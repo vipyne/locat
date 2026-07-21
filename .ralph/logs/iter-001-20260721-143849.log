@@ -1,1 +1,6 @@
 === ralph iteration 1/25 (20260721-143849) ===
+Done for this iteration.
+
+**What happened:** `PROGRESS.md` did not exist, so per the loop rules I created it — a full unchecked checklist of every phase (0→6) and its tasks from `PLAN.md`, including the human-gated Phase 6 — and committed it (`003603b`).
+
+**State for the next iteration:** The first incomplete task is now **Phase 0 — Scaffold & Python env** (`uv init`, `.python-version` = 3.12, `pyproject.toml`, `.gitignore`). Stopping here as instructed.
