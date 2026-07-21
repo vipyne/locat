@@ -39,8 +39,8 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] Context: current universal LLM context + aggregator (confirm class names via context hub),
       seeded with financial system prompt (inline placeholder for now; Phase 4 swaps in the tuned prompt)
 - [x] `PipelineTask(..., params=PipelineParams(allow_interruptions=True))`; `PipelineRunner`
-- [ ] Greeting: bot speaks a short opening line on transport ready
-- [ ] Verify: pipeline assembles / imports without error (full run is Phase 6)
+- [x] Greeting: bot speaks a short opening line on transport ready
+- [x] Verify: pipeline assembles / imports without error (full run is Phase 6)
 
 ## Phase 4 — Config & system prompt
 - [ ] `config.py`: read env for `LLM_MODEL`, `OLLAMA_BASE_URL`, `WHISPER_MODEL`, `KOKORO_VOICE`,
@@ -282,3 +282,27 @@ incomplete task, checks it off with a one-line note, and commits.
   NEXT: Phase 3 — greeting: on transport-ready, have the bot speak a short opening line. Confirm the
   LocalAudioTransport ready/connected event-handler name + how to queue an opening utterance
   (TTSSpeakFrame vs. seeding an assistant turn / queue_frames) via context hub before writing.
+- (Phase 3) Added the startup greeting to bot.py — COMPLETES Phase 3. Confirmed the pattern via
+  context hub (NOT guessed), and it corrected a wrong assumption:
+    * KEY FINDING: `LocalAudioTransport` does NOT emit `on_client_connected`. That event is only
+      fired by NETWORKED transports (WebSocket / SmallWebRTC / Daily / HeyGen / Tavus; LiveKit uses
+      `on_participant_connected`). LocalAudioTransport's input/output `start()` just call
+      `set_transport_ready()` and never `_call_event_handler("on_client_connected")`. So the common
+      `@transport.event_handler("on_client_connected")` greeting pattern (seen in
+      features-switch-languages.py) would SILENTLY NEVER FIRE here — a real trap the plan's
+      "on client/transport ready" wording could have led into.
+    * CORRECT PATTERN (from Pipecat's own getting-started/01a-local-audio.py): run the pipeline and
+      a greeting coroutine concurrently via `asyncio.gather(runner.run(task), _speak_greeting(task))`;
+      the coroutine `await asyncio.sleep(~1s)` (lets the audio-out stream spin up) then
+      `await task.queue_frames([TTSSpeakFrame(greeting)])`. `TTSSpeakFrame` sends text STRAIGHT to
+      Kokoro TTS (no LLM round-trip) — ideal for a fixed opening line. check_deprecation(TTSSpeakFrame):
+      NOT deprecated — it's the recommended replacement for the removed `TTSService.say()`.
+    * DECISION: did NOT queue an `EndFrame` after the greeting (the 01a example is one-shot and ends;
+      ours is a conversation, so the pipeline must keep running/listening). Greeting text + delay are
+      env-overridable (GREETING, GREETING_DELAY_SECS) with sensible defaults; the default greeting is
+      a short spoken-tuned financial-thinking-partner hello (Phase 4 owns the full personality/prompt).
+  VERIFY (exceeded "assembles/imports without error", HF_HUB_OFFLINE=1): `import bot` clean;
+  `_speak_greeting` present + is a coroutine fn; `build_pipeline_task()` still assembles + LINKS all
+  7 processors; `TTSSpeakFrame(greeting)` constructs. Zero network. Passed. Did NOT run the live task
+  (needs mic + Ollama = human-gated Phase 6).
+  NEXT: Phase 4 — config.py (env-driven settings, zero-config defaults). Phase 3 is now COMPLETE.
