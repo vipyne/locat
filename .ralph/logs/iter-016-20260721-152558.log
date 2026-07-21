@@ -1,0 +1,15 @@
+=== ralph iteration 16/25 (20260721-152558) ===
+This iteration is complete.
+
+**Task done:** Phase 4 → `.env.example` (documented config knobs).
+
+**What I did:**
+- Created `.env.example` documenting all 14 env knobs the project reads — grouped by service (LLM/STT/TTS/audio/greeting/logging) plus advanced cache-dir vars and the Ollama-server relocation vars from `run_ollama.sh`.
+- Every line is commented and shows its default value, so `cp .env.example .env` still yields the zero-config defaults.
+- Stated up front that it's config-only, never secrets, no API keys — which also pre-satisfies a Phase 5 README point.
+
+**Verify (passed):** grepped every env var referenced across `config.py` + `scripts/*.sh` + `scripts/*.py` (14 vars) and diffed against what `.env.example` documents — the sets are identical, nothing missing or extra. The phase-level "visibly changes behavior" box stays unchecked (needs the human Phase 6 live run).
+
+**Committed:** `db33819` (staged explicitly to keep the permission-blocked `_verify_tmp.py` scratch file out).
+
+**Next iteration:** Phase 4 → `prompts/financial_advisor.py` (the tuned system prompt), then swap `bot.py`'s inline placeholder to import it.
