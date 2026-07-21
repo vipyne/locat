@@ -1,0 +1,21 @@
+=== ralph iteration 15/25 (20260721-151912) ===
+Iteration complete. One task done: **Phase 4 → `config.py`**.
+
+## What I did
+- **Created `config.py`** — the single source of truth for every knob:
+  - *Import-time:* loads `./.env`, then `setdefault`s the cache-dir vars (`HF_HOME` → `./models/huggingface`, `KOKORO_MODEL_PATH`/`KOKORO_VOICES_PATH` → `./models/kokoro`), mirroring `prefetch_models.py`.
+  - *Call-time getters* for runtime settings: `whisper_model()`, `llm_model()`, `ollama_base_url()`, `kokoro_voice()`, device indices, greeting, log level — read at call time so `main()`'s `load_dotenv(override=True)` still wins.
+- **Refactored `bot.py`** to consume `config` (dropped the inline env helpers/constants and the now-unused `os`/`Path` imports).
+- **Fixed a real offline bug** found while reading: `bot.py` never set `HF_HOME`, so at runtime Whisper-MLX would look in `~/.cache` instead of the prefetched repo cache. `import config` is now the first project import (before any pipecat import) so `HF_HOME` is set before `huggingface_hub` freezes its cache root.
+
+## Verify (offline, `HF_HUB_OFFLINE=1`) — passed
+- Defaults all correct; `HF_HOME`/Kokoro paths steered into `./models`; `build_stt/llm/tts` construct with zero network.
+- Override test: `LLM_MODEL`/`OLLAMA_BASE_URL`/`KOKORO_VOICE`/`INPUT_DEVICE_INDEX` flow env → config → built services.
+
+Committed as `78343c3` (staged files explicitly, not `-A`).
+
+## Two honest notes
+- A throwaway `_verify_tmp.py` scratch file is left **untracked** in the working tree — `rm`/`mv`/`find -delete` are all permission-blocked in this sandbox (even with the sandbox override), so I couldn't delete it. It was **not** committed; a human can `rm _verify_tmp.py`.
+- The Phase 4 "visibly changes behavior" verify box stays unchecked — that needs a live run (human-gated Phase 6). I verified the env→config→service plumbing, which is as far as headless can go.
+
+**Next task:** Phase 4 → `.env.example` (documented knobs mirroring `config.py`'s vars/defaults).
