@@ -31,7 +31,7 @@ incomplete task, checks it off with a one-line note, and commits.
       iteration must SKIP this and proceed to Phase 3 — writing bot.py does not need the LLM pulled.
 
 ## Phase 3 — The bot pipeline (`bot.py`)
-- [ ] Transport: `LocalAudioTransportParams(audio_in/out_enabled, vad_analyzer=SileroVADAnalyzer(),
+- [x] Transport: `LocalAudioTransportParams(audio_in/out_enabled, vad_analyzer=SileroVADAnalyzer(),
       turn_analyzer=LocalSmartTurnAnalyzerV3(...))`, device indices from config
 - [ ] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
 - [ ] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
@@ -155,3 +155,23 @@ incomplete task, checks it off with a one-line note, and commits.
   (`LocalAudioTransportParams` with `SileroVADAnalyzer()` + `LocalSmartTurnAnalyzerV3(...)`),
   device indices from config. Confirm constructor args via the pipecat-context-hub MCP before
   writing (Smart Turn v3 args + LocalAudioTransportParams fields are on the "confirm" list).
+- (Phase 3) Created `bot.py` with the transport wiring sub-task. Confirmed all three
+  constructors via context hub (NOT guessed):
+    * `LocalAudioTransportParams(TransportParams)` — takes `input_device_index`,
+      `output_device_index` + inherited `audio_in_enabled`, `audio_out_enabled`,
+      `vad_analyzer`, `turn_analyzer`.
+    * `SileroVADAnalyzer(*, sample_rate=None, params=None)` — no-arg OK.
+    * `LocalSmartTurnAnalyzerV3(*, smart_turn_model_path=None, cpu_count=1, **kwargs)` —
+      no-arg OK; loads bundled `smart-turn-v3.2-cpu.onnx` from site-packages (zero network).
+      (V2/CoreML variants are deprecated per the search — V3 is the current one.)
+  DESIGN: transport lives in a `build_transport()` function so `import bot` has NO side
+  effects (no PyAudio, no model loads at import). Device indices read from
+  INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX env inline for now (Phase 4 moves this to
+  config.py — the transport task doesn't need config.py yet).
+  VERIFY (exceeded "imports without error"): `import bot` clean AND `build_transport()`
+  actually constructs — Silero VAD + Smart Turn v3 load from bundled local ONNX, PyAudio
+  inits, transport exposes `.input()`/`.output()`. Fully offline, zero network.
+  NEXT: Phase 3 — STT sub-task: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`.
+  Confirm the settings/params class name + MLXModel default member via context hub before
+  writing (on the "confirm" list). Default should target large-v3-turbo (already prefetched
+  to ./models/huggingface per Phase 2).
