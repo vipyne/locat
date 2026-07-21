@@ -44,6 +44,8 @@ from pipecat.transports.local.audio import (
     LocalAudioTransportParams,
 )
 
+from prompts.financial_advisor import SYSTEM_PROMPT
+
 
 def build_transport() -> LocalAudioTransport:
     """Build the local audio transport with VAD + smart-turn turn-taking.
@@ -129,15 +131,6 @@ def build_tts() -> KokoroTTSService:
     )
 
 
-# Placeholder system prompt. Phase 4 replaces this with the tuned financial
-# thinking-partner prompt from prompts/financial_advisor.py; kept inline here so
-# the context sub-task stands alone and `import bot` stays dependency-free.
-_SYSTEM_PROMPT = (
-    "You are a private, offline voice assistant. Keep replies short and "
-    "conversational for spoken output — no markdown, no lists."
-)
-
-
 def build_context() -> LLMContext:
     """Build the universal LLM context, seeded with the system prompt.
 
@@ -146,8 +139,12 @@ def build_context() -> LLMContext:
     history that the LLM service reads on each turn. We seed it with a single
     `system` message; user and assistant turns are appended at runtime by the
     aggregator pair (see `build_context_aggregator`).
+
+    The system prompt is the tuned financial thinking-partner personality from
+    `prompts/financial_advisor.py` (spoken-output-tuned, not-a-licensed-advisor,
+    no real account access).
     """
-    return LLMContext(messages=[{"role": "system", "content": _SYSTEM_PROMPT}])
+    return LLMContext(messages=[{"role": "system", "content": SYSTEM_PROMPT}])
 
 
 def build_context_aggregator(context: LLMContext) -> LLMContextAggregatorPair:

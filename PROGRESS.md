@@ -48,8 +48,9 @@ incomplete task, checks it off with a one-line note, and commits.
       (created config.py + refactored bot.py to consume it; fixed a real offline gap — bot now
       steers HF_HOME → ./models/huggingface at config-import time)
 - [x] `.env.example`: documented config knobs
-- [ ] `prompts/financial_advisor.py`: private financial thinking-partner system prompt, tuned for
+- [x] `prompts/financial_advisor.py`: private financial thinking-partner system prompt, tuned for
       spoken output (concise, no markdown, not-a-licensed-advisor disclaimer, no real account access)
+      (created prompts/ package + SYSTEM_PROMPT; bot.py imports it, inline placeholder removed)
 - [ ] Verify: changing `LLM_MODEL` / `KOKORO_VOICE` in `.env` visibly changes behavior
 
 ## Phase 5 — README & example polish (last autonomous step)
@@ -356,3 +357,23 @@ incomplete task, checks it off with a one-line note, and commits.
   NEXT: Phase 4 — `prompts/financial_advisor.py`: the tuned private financial thinking-partner
   system prompt (spoken-output-tuned, no markdown, not-a-licensed-advisor disclaimer, no real
   account access), then swap bot.py's inline `_SYSTEM_PROMPT` placeholder to import it.
+- (Phase 4) Created the `prompts/` package (`__init__.py` + `financial_advisor.py`) and wired it
+  into bot.py. `financial_advisor.py` exports `SYSTEM_PROMPT` (1555 chars): a private, offline
+  financial *thinking partner* — asks clarifying questions and reasons through trade-offs rather
+  than issuing verdicts; states plainly it is NOT a licensed advisor and steers big/irreversible
+  moves to a professional; has NO access to real accounts and must never invent the user's numbers;
+  tuned for SPOKEN output (short conversational turns, plain words, one idea at a time, explicit
+  "never use markdown / bullets / lists / headings"). bot.py now `from prompts.financial_advisor
+  import SYSTEM_PROMPT`; removed the inline `_SYSTEM_PROMPT` placeholder and its comment;
+  `build_context()` seeds the LLMContext system message from it.
+  VERIFY (this task = create the prompt + wire it): `uv run python -c "import bot; build_context()
+  ._messages[0]"` — the system message equals `SYSTEM_PROMPT` and contains the thinking-partner /
+  not-a-licensed-advisor / no-markdown markers. Passed (no network; build_context loads no models).
+  NOTE: the phase-level verify box ("changing LLM_MODEL/KOKORO_VOICE visibly changes behavior")
+  stays UNCHECKED — it needs the live human Phase 6 run; the env->config->service plumbing was
+  already proven in the config.py override test. (Could not use `HF_HUB_OFFLINE=1` inline prefix —
+  it's permission-gated headless this iteration; ran the offline-safe verify without it since
+  build_context touches no model files.)
+  NEXT: Phase 5 — README (what it is, hardware notes, brew install portaudio, uv sync, model-pull
+  steps with approx sizes, run, run offline, pick audio devices, config table, no-API-keys note,
+  deferred roadmap). Phase 5 is the LAST autonomous step before human-gated Phase 6.
