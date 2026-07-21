@@ -35,7 +35,7 @@ incomplete task, checks it off with a one-line note, and commits.
       turn_analyzer=LocalSmartTurnAnalyzerV3(...))`, device indices from config
 - [x] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
 - [x] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
-- [ ] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
+- [x] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
 - [ ] Context: current universal LLM context + aggregator (confirm class names via context hub),
       seeded with financial system prompt
 - [ ] `PipelineTask(..., params=PipelineParams(allow_interruptions=True))`; `PipelineRunner`
@@ -203,3 +203,21 @@ incomplete task, checks it off with a one-line note, and commits.
   NEXT: Phase 3 — TTS sub-task: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`.
   Confirm the Settings/voice class name + default Kokoro voice id + whether model_path/voices_path are
   needed to pin the cache into ./models/kokoro via context hub before writing (on the "confirm" list).
+- (Phase 3) Added `build_tts()` to bot.py. Confirmed the API via context hub (NOT guessed):
+  `KokoroTTSService(*, voice_id=None, model_path=None, voices_path=None, params=None, settings=None)`.
+  The bare `voice_id=` kwarg is DEPRECATED as of Pipecat 0.0.105, so used
+  `settings=KokoroTTSService.Settings(voice=...)`. IMPORTANT finding: the shipped `Settings` default is
+  `voice=None`, and `run_tts` passes `voice=self._settings.voice` straight into
+  `kokoro.create_stream(...)` — a None voice cannot be synthesized. So the bot MUST supply an explicit
+  voice. Chose default `af_heart` (Kokoro-v1.0's flagship American-English voice) via KOKORO_VOICE env.
+  DECISION: pinned `model_path`/`voices_path` to the repo-local `./models/kokoro/kokoro-v1.0.onnx` +
+  `voices-v1.0.bin` (overridable via KOKORO_MODEL_PATH / KOKORO_VOICES_PATH) — the EXACT files
+  scripts/prefetch_models.py downloads, so a warmed-up repo constructs with zero network. Repo root
+  resolved from `__file__` (same convention prefetch uses via REPO_ROOT).
+  VERIFY (exceeded "imports without error"): with HF_HUB_OFFLINE=1, `import bot` + `build_tts()` returns
+  a real `KokoroTTSService`; `_settings.voice == 'af_heart'`; loaded the prefetched ONNX from
+  ./models/kokoro with zero network. Passed.
+  NEXT: Phase 3 — Context sub-task: current universal LLM context + aggregator (LLMContext /
+  llm_response_universal). Confirm exact class names + the pattern for seeding the system prompt and
+  wiring user/assistant aggregators into the pipeline via context hub before writing (on the "confirm"
+  list — the aggregator API has changed across releases; do NOT assume).
