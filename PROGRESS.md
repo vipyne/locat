@@ -34,7 +34,7 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] Transport: `LocalAudioTransportParams(audio_in/out_enabled, vad_analyzer=SileroVADAnalyzer(),
       turn_analyzer=LocalSmartTurnAnalyzerV3(...))`, device indices from config
 - [x] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
-- [ ] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
+- [x] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
 - [ ] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
 - [ ] Context: current universal LLM context + aggregator (confirm class names via context hub),
       seeded with financial system prompt
@@ -188,3 +188,18 @@ incomplete task, checks it off with a one-line note, and commits.
   returns a real `WhisperSTTServiceMLX` instance with zero network. Passed.
   NEXT: Phase 3 — LLM sub-task: `OLLamaLLMService(model=<env>, base_url=<env default
   localhost:11434/v1>)`. Confirm constructor args via context hub before writing.
+- (Phase 3) Added `build_llm()` to bot.py. Confirmed the API via context hub (NOT guessed):
+  `OLLamaLLMService(*, model=None, base_url='http://localhost:11434/v1', settings=None, **kwargs)`,
+  extends `OpenAILLMService`. The bare `model=` kwarg is DEPRECATED as of Pipecat 0.0.105, so used
+  the `settings=OLLamaLLMService.Settings(model=...)` form (same convention as build_stt). Model from
+  LLM_MODEL env (default `qwen2.5:14b` — the SAME string scripts/run_ollama.sh pulls, so bot & pull
+  agree); endpoint from OLLAMA_BASE_URL env (default `http://localhost:11434/v1`, note the trailing
+  `/v1` OpenAI-compat path). Construction does NOT contact the server (connection is at pipeline run).
+  DESIGN: kept the no-side-effects-on-import property; builder is cheap + fully offline.
+  VERIFY (exceeded "imports without error", HF_HUB_OFFLINE=1): `import bot` + `build_llm()` returns a
+  real `OLLamaLLMService`; settings hold model `qwen2.5:14b`; default client base_url is
+  `http://localhost:11434/v1`; env overrides confirmed (OLLAMA_BASE_URL→127.0.0.1:9999/v1,
+  LLM_MODEL→llama3.2:3b both took effect). Zero network. Passed.
+  NEXT: Phase 3 — TTS sub-task: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`.
+  Confirm the Settings/voice class name + default Kokoro voice id + whether model_path/voices_path are
+  needed to pin the cache into ./models/kokoro via context hub before writing (on the "confirm" list).
