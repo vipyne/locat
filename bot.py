@@ -16,9 +16,11 @@ all hardware/model construction happens inside the builder functions and `main()
 """
 
 import os
+from pathlib import Path
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 from pipecat.transports.local.audio import (
@@ -101,4 +103,43 @@ def build_llm() -> OLLamaLLMService:
     return OLLamaLLMService(
         settings=OLLamaLLMService.Settings(model=model),
         base_url=base_url,
+    )
+
+
+# Repo-local Kokoro cache, matching where scripts/prefetch_models.py downloads to
+# (./models/kokoro/…). Pinning these makes the bot find the prefetched files
+# offline instead of re-downloading into the default kokoro-onnx cache.
+_REPO_ROOT = Path(__file__).resolve().parent
+_KOKORO_DIR = _REPO_ROOT / "models" / "kokoro"
+
+
+def build_tts() -> KokoroTTSService:
+    """Build the local Kokoro neural text-to-speech service.
+
+    Kokoro runs fully offline via kokoro-onnx. The voice comes from KOKORO_VOICE
+    (default `af_heart` — Kokoro's flagship American-English voice; the shipped
+    `Settings.voice` default is `None`, which kokoro-onnx cannot synthesize, so we
+    always supply an explicit id).
+
+    `model_path` / `voices_path` are pinned into ./models/kokoro (overridable via
+    KOKORO_MODEL_PATH / KOKORO_VOICES_PATH) — the exact files scripts/prefetch_models.py
+    downloads, so a warmed-up repo runs with zero network. If the files are missing,
+    `KokoroTTSService.__init__` downloads them on the spot (the one online step).
+
+    Uses the current `settings=KokoroTTSService.Settings(voice=...)` API; the bare
+    `voice_id=` constructor arg is deprecated as of Pipecat 0.0.105.
+    """
+    voice = os.getenv("KOKORO_VOICE", "").strip() or "af_heart"
+    model_path = (
+        os.getenv("KOKORO_MODEL_PATH", "").strip()
+        or str(_KOKORO_DIR / "kokoro-v1.0.onnx")
+    )
+    voices_path = (
+        os.getenv("KOKORO_VOICES_PATH", "").strip()
+        or str(_KOKORO_DIR / "voices-v1.0.bin")
+    )
+    return KokoroTTSService(
+        settings=KokoroTTSService.Settings(voice=voice),
+        model_path=model_path,
+        voices_path=voices_path,
     )
