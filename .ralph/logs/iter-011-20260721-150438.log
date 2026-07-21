@@ -1,1 +1,13 @@
 === ralph iteration 11/25 (20260721-150438) ===
+Iteration complete. One task done, verified, committed.
+
+**What I did this iteration:** Phase 3 — TTS sub-task. Added `build_tts()` to `bot.py`.
+
+**Key decisions (all confirmed via `pipecat-context-hub`, not guessed):**
+- Used the current `settings=KokoroTTSService.Settings(voice=...)` API (bare `voice_id=` is deprecated as of 0.0.105).
+- **Notable finding:** the shipped `Settings.voice` default is `None`, and `run_tts` passes it straight into `kokoro.create_stream(...)` — a `None` voice can't be synthesized. So the bot *must* supply an explicit voice. Defaulted to `af_heart` (Kokoro-v1.0's flagship voice), overridable via `KOKORO_VOICE`.
+- Pinned `model_path`/`voices_path` to the repo-local `./models/kokoro/*` files that `prefetch_models.py` downloads, so a warmed-up repo runs with zero network.
+
+**Verify:** With `HF_HUB_OFFLINE=1`, `import bot` + `build_tts()` returns a real `KokoroTTSService` with `voice=af_heart`, loading the prefetched ONNX — zero network. Passed.
+
+**Next iteration:** Phase 3 — the Context sub-task (universal `LLMContext` + `llm_response_universal` aggregator, seeded with the financial system prompt). The aggregator API has changed across releases, so the next iteration must confirm exact class names via the context hub before writing.
