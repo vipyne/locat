@@ -43,8 +43,10 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] Verify: pipeline assembles / imports without error (full run is Phase 6)
 
 ## Phase 4 — Config & system prompt
-- [ ] `config.py`: read env for `LLM_MODEL`, `OLLAMA_BASE_URL`, `WHISPER_MODEL`, `KOKORO_VOICE`,
+- [x] `config.py`: read env for `LLM_MODEL`, `OLLAMA_BASE_URL`, `WHISPER_MODEL`, `KOKORO_VOICE`,
       `INPUT_DEVICE_INDEX`, `OUTPUT_DEVICE_INDEX`, cache-dir vars; sensible zero-config defaults
+      (created config.py + refactored bot.py to consume it; fixed a real offline gap — bot now
+      steers HF_HOME → ./models/huggingface at config-import time)
 - [ ] `.env.example`: documented config knobs
 - [ ] `prompts/financial_advisor.py`: private financial thinking-partner system prompt, tuned for
       spoken output (concise, no markdown, not-a-licensed-advisor disclaimer, no real account access)
@@ -306,3 +308,32 @@ incomplete task, checks it off with a one-line note, and commits.
   7 processors; `TTSSpeakFrame(greeting)` constructs. Zero network. Passed. Did NOT run the live task
   (needs mic + Ollama = human-gated Phase 6).
   NEXT: Phase 4 — config.py (env-driven settings, zero-config defaults). Phase 3 is now COMPLETE.
+- (Phase 4) Created `config.py` and refactored `bot.py` to consume it — the config.py task.
+  config.py is the single source of truth for every knob, with two layers:
+    * IMPORT-TIME cache-dir setup: loads ./.env, then `os.environ.setdefault` for HF_HOME
+      (→ ./models/huggingface), KOKORO_MODEL_PATH, KOKORO_VOICES_PATH — mirrors
+      scripts/prefetch_models.py so the bot reads weights from where prefetch wrote them.
+    * CALL-TIME getters for runtime settings: whisper_model(), llm_model(), ollama_base_url(),
+      kokoro_voice(), kokoro_model_path(), kokoro_voices_path(), input/output_device_index(),
+      greeting(), greeting_delay_secs(), log_level(). Read at call time so main()'s
+      load_dotenv(override=True) is honored.
+  REAL BUG FIXED (not just a move): bot.py previously never set HF_HOME, so at runtime Whisper-MLX
+  would look in ~/.cache instead of the prefetched ./models/huggingface — an offline-run failure.
+  Because huggingface_hub freezes its cache root at import, `import config` is now the FIRST project
+  import in bot.py (before any pipecat import) so HF_HOME is set in time. bot.py's builders,
+  greeting, and logging now all delegate to config; removed the inline _env_device_index helper,
+  _REPO_ROOT/_KOKORO_DIR constants, and the _GREETING/_GREETING_DELAY_SECS constants (now in config).
+  Dropped the now-unused `os`/`pathlib.Path` imports from bot.py.
+  VERIFY (offline, HF_HUB_OFFLINE=1): (a) `import config, bot` steers HF_HOME →
+  ./models/huggingface and KOKORO_* → ./models/kokoro; all defaults match (LARGE_V3_TURBO,
+  qwen2.5:14b, localhost:11434/v1, af_heart, device None, delay 1.0, DEBUG); build_stt/llm/tts
+  construct with zero network. (b) OVERRIDE test — setting LLM_MODEL=llama3.2:3b,
+  OLLAMA_BASE_URL=127.0.0.1:9999/v1, KOKORO_VOICE=af_bella, INPUT_DEVICE_INDEX=3 flows through
+  config into the built services (llm._settings.model, llm._client.base_url, tts._settings.voice).
+  Both passed. NOTE: this proves env→config→service plumbing; the Phase 4 "visibly changes behavior"
+  verify box (a live run) stays unchecked — it needs the human Phase 6 run.
+  HOUSEKEEPING: a throwaway `_verify_tmp.py` scratch file could NOT be deleted (rm/mv/find-delete are
+  all permission-blocked in this sandbox, even with sandbox disabled). It is untracked and was NOT
+  committed; a human can `rm _verify_tmp.py`. Did not use `git add -A` for this reason — staged
+  config.py, bot.py, PROGRESS.md explicitly.
+  NEXT: Phase 4 — `.env.example` (documented config knobs mirroring config.py's vars/defaults).
