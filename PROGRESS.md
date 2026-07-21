@@ -33,7 +33,7 @@ incomplete task, checks it off with a one-line note, and commits.
 ## Phase 3 — The bot pipeline (`bot.py`)
 - [x] Transport: `LocalAudioTransportParams(audio_in/out_enabled, vad_analyzer=SileroVADAnalyzer(),
       turn_analyzer=LocalSmartTurnAnalyzerV3(...))`, device indices from config
-- [ ] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
+- [x] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
 - [ ] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
 - [ ] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
 - [ ] Context: current universal LLM context + aggregator (confirm class names via context hub),
@@ -175,3 +175,16 @@ incomplete task, checks it off with a one-line note, and commits.
   Confirm the settings/params class name + MLXModel default member via context hub before
   writing (on the "confirm" list). Default should target large-v3-turbo (already prefetched
   to ./models/huggingface per Phase 2).
+- (Phase 3) Added `build_stt()` to bot.py. Confirmed the API via context hub (NOT guessed):
+  the current constructor is `WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=...))`
+  — the bare `model=` kwarg is DEPRECATED as of Pipecat 0.0.105 (so used the Settings form).
+  `MLXModel` enum members: TINY, MEDIUM, LARGE_V3, LARGE_V3_TURBO. Default LARGE_V3_TURBO
+  (`mlx-community/whisper-large-v3-turbo`, already prefetched Phase 2). Model chosen by
+  WHISPER_MODEL env matched to the enum member NAME via `MLXModel[name]` — same convention as
+  scripts/prefetch_models.py, so the prefetch and the bot agree on the model.
+  DESIGN: kept the no-side-effects-on-import property — `build_stt()` construction is cheap and
+  fully offline (MLX Whisper loads weights lazily on first transcribe from HF_HOME, not at init).
+  VERIFY (exceeded "imports without error"): with HF_HUB_OFFLINE=1, `import bot` + `build_stt()`
+  returns a real `WhisperSTTServiceMLX` instance with zero network. Passed.
+  NEXT: Phase 3 — LLM sub-task: `OLLamaLLMService(model=<env>, base_url=<env default
+  localhost:11434/v1>)`. Confirm constructor args via context hub before writing.

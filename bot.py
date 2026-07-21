@@ -19,6 +19,7 @@ import os
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 from pipecat.transports.local.audio import (
     LocalAudioTransport,
     LocalAudioTransportParams,
@@ -56,3 +57,23 @@ def build_transport() -> LocalAudioTransport:
         turn_analyzer=LocalSmartTurnAnalyzerV3(),
     )
     return LocalAudioTransport(params)
+
+
+def build_stt() -> WhisperSTTServiceMLX:
+    """Build the Whisper-MLX speech-to-text service.
+
+    Apple-Silicon-optimized Whisper via MLX. The model is chosen by the
+    WHISPER_MODEL env var, matched against the `MLXModel` enum member name
+    (default LARGE_V3_TURBO — finetuned/pruned large-v3, much faster with only
+    slightly lower accuracy; already prefetched to ./models/huggingface in
+    Phase 2). Other members: TINY, MEDIUM, LARGE_V3.
+
+    Uses the current `settings=WhisperSTTServiceMLX.Settings(model=...)` API;
+    the bare `model=` constructor arg is deprecated as of Pipecat 0.0.105.
+
+    Construction is cheap and offline: MLX Whisper loads the weights lazily on
+    the first transcription (from HF_HOME), so no network happens here.
+    """
+    model_name = os.getenv("WHISPER_MODEL", "").strip() or "LARGE_V3_TURBO"
+    model = MLXModel[model_name]
+    return WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))
