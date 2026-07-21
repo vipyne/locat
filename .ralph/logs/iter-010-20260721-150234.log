@@ -1,1 +1,9 @@
 === ralph iteration 10/25 (20260721-150234) ===
+Iteration complete. 
+
+**This iteration (Phase 3 — LLM sub-task):**
+- Confirmed `OLLamaLLMService(*, model, base_url='http://localhost:11434/v1', settings, **kwargs)` via the context hub — the bare `model=` kwarg is deprecated (0.0.105), so I used the `settings=OLLamaLLMService.Settings(model=...)` form, matching the existing `build_stt()` convention.
+- Added `build_llm()` to `bot.py`: model from `LLM_MODEL` (default `qwen2.5:14b`, the same tag `run_ollama.sh` pulls), endpoint from `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`). Kept import side-effect-free.
+- **Verified** (offline, `HF_HUB_OFFLINE=1`): `import bot` + `build_llm()` returns a real `OLLamaLLMService`, settings hold `qwen2.5:14b`, default base_url correct, and env overrides confirmed to take effect. No server contact at construction. Checked the task off and committed (`304e11a`).
+
+**Next incomplete task:** Phase 3 — TTS sub-task (`KokoroTTSService` with voice/model_path/voices_path), which the next iteration will confirm via the context hub before writing.
