@@ -1,1 +1,20 @@
 === ralph iteration 12/25 (20260721-150702) ===
+Done — one Ralph iteration complete.
+
+## Summary
+
+**Task picked** (first incomplete, Phase 3): wire up the universal LLM context + aggregator, seeded with the system prompt.
+
+**What I did:**
+- Confirmed the current API via `pipecat-context-hub` (not guessed, per the "do not guess" list):
+  - `LLMContext(messages=[...])` from `pipecat.processors.aggregators.llm_context` — seed the system prompt via a `{"role": "system", ...}` message.
+  - `LLMContextAggregatorPair(context)` from `pipecat.processors.aggregators.llm_response_universal` — yields `LLMUserAggregator` (before LLM) + `LLMAssistantAggregator` (after TTS); supports tuple-unpacking.
+- Added `build_context()` and `build_context_aggregator()` to `bot.py`, seeded with an **inline placeholder** system prompt (the tuned `prompts/financial_advisor.py` is Phase 4 — kept inline so this task stands alone).
+
+**Verify (passed, offline `HF_HUB_OFFLINE=1`):** `build_context()` returns a seeded `LLMContext`; `build_context_aggregator(ctx)` unpacks to user+assistant aggregators sharing the same context object. Zero network.
+
+**Notable finding recorded in PROGRESS.md:** `import bot` remains side-effect-free, but `build_context_aggregator()` now loads the bundled Smart Turn v3 ONNX — the universal `LLMAssistantAggregator` embeds turn management. Still fully offline (site-packages, no download).
+
+**Committed:** `f437461`.
+
+**Next iteration:** assemble the full `Pipeline` + `PipelineTask(params=PipelineParams(allow_interruptions=True))` + `PipelineRunner`.
