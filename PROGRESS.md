@@ -9,11 +9,11 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] Verify: `uv run python -c "import sys; print(sys.version)"` reports 3.12.x
 
 ## Phase 1 — Dependencies
-- [ ] Add Pipecat with local-service extras (confirm exact extra names via context hub):
+- [x] Add Pipecat with local-service extras (confirm exact extra names via context hub):
       whisper-mlx, kokoro, ollama, silero, local-smart-turn + pyaudio, python-dotenv,
       loguru, textual
-- [ ] Verify: `uv sync` succeeds
-- [ ] Verify: each service class imports cleanly (LocalAudioTransport, WhisperSTTServiceMLX,
+- [x] Verify: `uv sync` succeeds
+- [x] Verify: each service class imports cleanly (LocalAudioTransport, WhisperSTTServiceMLX,
       OLLamaLLMService, KokoroTTSService, SileroVADAnalyzer, LocalSmartTurnAnalyzerV3);
       fix deprecated import paths via `check_deprecation`
 
@@ -71,3 +71,18 @@ incomplete task, checks it off with a one-line note, and commits.
   Verified with `git check-ignore` — all patterns match. Phase 0 complete.
   NEXT: Phase 1 — add Pipecat deps with local-service extras (confirm exact
   extra names via context hub before `uv add`).
+- (Phase 1) Confirmed extra names via context hub: STT MLX = `mlx-whisper`,
+  TTS = `kokoro`, LLM = `ollama`, VAD = `silero`. Smart Turn v3 is BUNDLED in
+  core pipecat-ai (transformers/onnxruntime included) — NO extra needed (plan's
+  guessed `local-smart-turn` does not exist). Surprise: `pipecat.services.whisper.stt`
+  imports `faster_whisper` at module load (CPU + MLX classes share one module), so
+  the `whisper` extra is ALSO required alongside `mlx-whisper` or the import fails.
+  LocalAudioTransport needs `pyaudio` (added directly; PortAudio 19.7.0 already
+  brew-installed). Final deps: `pipecat-ai[kokoro,mlx-whisper,ollama,silero,whisper]>=1.5.0`
+  + pyaudio, python-dotenv, textual, loguru. `uv sync` clean (123 pkgs, torch 2.13.0);
+  all 9 service/pipeline classes import OK on Pipecat 1.5.0 / Python 3.12.0.
+  check_deprecation on OLLamaLLMService, LocalSmartTurnAnalyzerV3, WhisperSTTServiceMLX
+  → none deprecated. Phase 1 complete.
+  NEXT: Phase 2 — model acquisition (online step): `scripts/run_ollama.sh` +
+  `scripts/prefetch_models.py`. NOTE: pulling qwen2.5:14b (~9GB) + HF caches needs
+  network; if unavailable when reached, this is a legitimate RALPH_BLOCKED (network).
