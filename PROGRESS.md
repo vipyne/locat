@@ -36,8 +36,8 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] STT: `WhisperSTTServiceMLX(settings=...(model=MLXModel.<size>))`, configurable
 - [x] LLM: `OLLamaLLMService(model=<env>, base_url=<env>)`
 - [x] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
-- [ ] Context: current universal LLM context + aggregator (confirm class names via context hub),
-      seeded with financial system prompt
+- [x] Context: current universal LLM context + aggregator (confirm class names via context hub),
+      seeded with financial system prompt (inline placeholder for now; Phase 4 swaps in the tuned prompt)
 - [ ] `PipelineTask(..., params=PipelineParams(allow_interruptions=True))`; `PipelineRunner`
 - [ ] Greeting: bot speaks a short opening line on transport ready
 - [ ] Verify: pipeline assembles / imports without error (full run is Phase 6)
@@ -221,3 +221,32 @@ incomplete task, checks it off with a one-line note, and commits.
   llm_response_universal). Confirm exact class names + the pattern for seeding the system prompt and
   wiring user/assistant aggregators into the pipeline via context hub before writing (on the "confirm"
   list — the aggregator API has changed across releases; do NOT assume).
+- (Phase 3) Added `build_context()` + `build_context_aggregator()` to bot.py. Confirmed the
+  current universal-context API via context hub (NOT guessed):
+    * `LLMContext(messages=None, tools=NOT_GIVEN, tool_choice=NOT_GIVEN)` from
+      `pipecat.processors.aggregators.llm_context` — seed the system prompt via
+      `messages=[{"role": "system", "content": ...}]`. (This is the current, non-deprecated
+      provider-agnostic context; the old per-provider `OpenAILLMContext` pattern is superseded.)
+    * `LLMContextAggregatorPair(context)` from
+      `pipecat.processors.aggregators.llm_response_universal` — yields the user aggregator
+      (`LLMUserAggregator`, before the LLM) and assistant aggregator (`LLMAssistantAggregator`,
+      after TTS). Supports tuple-unpacking (`user, assistant = pair`) AND `.user()` / `.assistant()`.
+  DECISION: seeded with an INLINE placeholder `_SYSTEM_PROMPT` (short, spoken-output-tuned). The
+  real tuned financial thinking-partner prompt is Phase 4 (`prompts/financial_advisor.py`); keeping
+  it inline lets this task stand alone without creating the Phase 4 file early. Phase 4 will import
+  and swap it in.
+  SURPRISE (worth noting for later phases): `import bot` is STILL side-effect-free (verified: plain
+  `import bot` loads NO models), BUT `build_context_aggregator()` DOES load the bundled Smart Turn v3
+  ONNX — the universal `LLMAssistantAggregator` now embeds turn management and instantiates a default
+  `LocalSmartTurnAnalyzerV3` internally. This is fully OFFLINE (loads
+  `smart-turn-v3.2-cpu.onnx` from site-packages, zero network) — just no longer "cheap". Not a
+  problem for the offline goal.
+  VERIFY (exceeded "imports without error", HF_HUB_OFFLINE=1): `import bot` + `build_context()`
+  returns an `LLMContext` seeded with the system message; `build_context_aggregator(ctx)` unpacks to
+  `LLMUserAggregator` + `LLMAssistantAggregator`, both sharing the SAME context object. Zero network.
+  Passed.
+  NEXT: Phase 3 — assemble the full Pipeline + `PipelineTask(params=PipelineParams(
+  allow_interruptions=True))` + `PipelineRunner`, wiring
+  transport.input() -> STT -> user-agg -> LLM -> TTS -> transport.output() -> assistant-agg.
+  Confirm the Pipeline/PipelineTask/PipelineParams API + interruptions flag via context hub before
+  writing.

@@ -20,6 +20,10 @@ from pathlib import Path
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
@@ -143,3 +147,39 @@ def build_tts() -> KokoroTTSService:
         model_path=model_path,
         voices_path=voices_path,
     )
+
+
+# Placeholder system prompt. Phase 4 replaces this with the tuned financial
+# thinking-partner prompt from prompts/financial_advisor.py; kept inline here so
+# the context sub-task stands alone and `import bot` stays dependency-free.
+_SYSTEM_PROMPT = (
+    "You are a private, offline voice assistant. Keep replies short and "
+    "conversational for spoken output — no markdown, no lists."
+)
+
+
+def build_context() -> LLMContext:
+    """Build the universal LLM context, seeded with the system prompt.
+
+    `LLMContext` is Pipecat's current provider-agnostic conversation store
+    (`pipecat.processors.aggregators.llm_context`) — it holds the message
+    history that the LLM service reads on each turn. We seed it with a single
+    `system` message; user and assistant turns are appended at runtime by the
+    aggregator pair (see `build_context_aggregator`).
+    """
+    return LLMContext(messages=[{"role": "system", "content": _SYSTEM_PROMPT}])
+
+
+def build_context_aggregator(context: LLMContext) -> LLMContextAggregatorPair:
+    """Build the user/assistant context-aggregator pair for `context`.
+
+    `LLMContextAggregatorPair` yields two processors that bracket the LLM in the
+    pipeline: the *user* aggregator (placed before the LLM) folds finalized STT
+    transcriptions into the context, and the *assistant* aggregator (placed after
+    TTS) folds the bot's spoken response back in. Access them via
+    `pair.user()` / `pair.assistant()`, or unpack directly:
+    `user, assistant = build_context_aggregator(context)`.
+
+    Constructing the pair is cheap and offline — no model loads, no network.
+    """
+    return LLMContextAggregatorPair(context)
