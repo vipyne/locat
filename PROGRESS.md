@@ -22,8 +22,13 @@ incomplete task, checks it off with a one-line note, and commits.
       `ollama pull qwen2.5:14b` (tag configurable)
 - [x] `scripts/prefetch_models.py`: with `HF_HOME` → `./models/`, force download of Whisper-MLX,
       Kokoro, Silero VAD, Smart Turn v3 model files
-- [ ] Verify: `./models/` contains ollama blobs + HF caches + kokoro files; `ollama list` shows
-      `qwen2.5:14b` from the repo store
+- [x] Verify (HF/Kokoro half): `./models/` contains HF caches + kokoro files
+      (`uv run python scripts/prefetch_models.py` ran clean — 1.5G whisper-large-v3-turbo + 348M kokoro)
+- [ ] Verify (Ollama half) — DEFERRED TO HUMAN (headless-blocked, NOT a loop task): `ollama list`
+      shows `qwen2.5:14b` from the repo store. The autonomous loop CANNOT invoke the `ollama` binary
+      (permission-gated headless; network itself works fine). A human runs, in a normal terminal:
+      `bash scripts/run_ollama.sh`  (relocates the store to ./models/ollama and pulls ~9GB). Next
+      iteration must SKIP this and proceed to Phase 3 — writing bot.py does not need the LLM pulled.
 
 ## Phase 3 — The bot pipeline (`bot.py`)
 - [ ] Transport: `LocalAudioTransportParams(audio_in/out_enabled, vad_analyzer=SileroVADAnalyzer(),
@@ -128,3 +133,25 @@ incomplete task, checks it off with a one-line note, and commits.
   `uv run python scripts/prefetch_models.py`; confirm `./models/` is populated and
   `ollama list` shows the model. Network-gated: if unavailable, that's a legit
   RALPH_BLOCKED (network), not a failure.
+- (Phase 2 verify) Ran `uv run python scripts/prefetch_models.py` — SUCCESS. Network
+  IS available here (unauthenticated HF downloads worked). Populated the repo store:
+  `models/huggingface` = 1.5G (mlx-community/whisper-large-v3-turbo, 4 files) and
+  `models/kokoro` = 348M (kokoro-v1.0.onnx 310M + voices-v1.0.bin 27M). Silero VAD +
+  Smart Turn v3 loaded from the bundled site-packages ONNX (zero download), confirming
+  the earlier plan-correction. So the HF/Kokoro half of the Phase 2 verify is genuinely
+  DONE and checked off.
+  BLOCKER (honest, not faked): the Ollama half CANNOT be done in this autonomous loop —
+  every `ollama` invocation (`ollama list`, `ollama --version`, `bash scripts/run_ollama.sh`,
+  even `command -v ollama`) is permission-gated headless and denied. `uv run`, `ls`, `du`,
+  `git` are allowed; `ollama`/`curl`/`bash <script>` are not. This is a permission limit of
+  the sandbox, NOT a network failure and NOT a code bug — `scripts/run_ollama.sh` is correct
+  and a human running it in a normal terminal will pull qwen2.5:14b into ./models/ollama.
+  DECISION: did NOT write RALPH_BLOCKED (that would halt Phases 3–5, which are headless-doable
+  and don't require the LLM pulled — the model is only needed at RUNTIME, which is the
+  human-gated Phase 6 anyway). Instead marked the ollama pull as a deferred HUMAN step (same
+  class as Phase 6) so the loop keeps building. The final iteration will consolidate all human
+  steps (ollama pull + Phase 6 offline test) into RALPH_BLOCKED.
+  NEXT: Phase 3 — start bot.py. First sub-task: transport wiring
+  (`LocalAudioTransportParams` with `SileroVADAnalyzer()` + `LocalSmartTurnAnalyzerV3(...)`),
+  device indices from config. Confirm constructor args via the pipecat-context-hub MCP before
+  writing (Smart Turn v3 args + LocalAudioTransportParams fields are on the "confirm" list).
