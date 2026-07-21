@@ -54,11 +54,11 @@ incomplete task, checks it off with a one-line note, and commits.
 - [ ] Verify: changing `LLM_MODEL` / `KOKORO_VOICE` in `.env` visibly changes behavior
 
 ## Phase 5 — README & example polish (last autonomous step)
-- [ ] README: what it is, hardware notes, `brew install portaudio`, `uv sync`, model-pull steps
+- [x] README: what it is, hardware notes, `brew install portaudio`, `uv sync`, model-pull steps
       with approx sizes, run, run offline, pick audio devices, config table
-- [ ] README: explicitly state no API keys required; `.env` is config only, never secrets
-- [ ] README: note deferred roadmap (memory → RAG → tools)
-- [ ] Verify: README documents clone → `uv sync` → model pull → run → offline run, nothing missing
+- [x] README: explicitly state no API keys required; `.env` is config only, never secrets
+- [x] README: note deferred roadmap (memory → RAG → tools)
+- [x] Verify: README documents clone → `uv sync` → model pull → run → offline run, nothing missing
 
 ## Phase 6 — Offline verification (HUMAN-GATED — the success criterion)
 - [ ] HUMAN: online smoke test — `uv run bot.py`, speak, hear reply, confirm interruptions
@@ -377,3 +377,33 @@ incomplete task, checks it off with a one-line note, and commits.
   NEXT: Phase 5 — README (what it is, hardware notes, brew install portaudio, uv sync, model-pull
   steps with approx sizes, run, run offline, pick audio devices, config table, no-API-keys note,
   deferred roadmap). Phase 5 is the LAST autonomous step before human-gated Phase 6.
+- (Phase 5) Created `README.md` — COMPLETES all autonomous phases (0–5). Documents the full path:
+  clone → `brew install portaudio` + `uv sync` → model pull (`bash scripts/run_ollama.sh` ~9GB +
+  `uv run python scripts/prefetch_models.py` — Whisper ~1.5GB, Kokoro ~350MB, ~11GB total) → run
+  (`uv run bot.py`) → offline run (Airplane Mode + local Ollama). Sizes/commands drawn from the
+  actual files (config.py defaults, run_ollama.sh, prefetch_models.py, .env.example — not guessed).
+  Includes: What's-inside table + pipeline diagram, Requirements (Apple Silicon / uv / Python 3.12
+  pinned / Ollama / PortAudio), device-selection one-liner (a pyaudio index-lister — did NOT
+  reference a `select_audio_device.py`, which does NOT exist in the repo despite .env.example's
+  mention; documented the real, working way instead), a full 15-row config table matching config.py
+  + run_ollama.sh knobs, an explicit "No secrets, no keys" section, repo layout, the deferred
+  roadmap (memory → RAG → tools), and a not-financial-advice note.
+  VERIFY (Phase 5 = completeness self-check, per PLAN — the offline run itself is Phase 6): walked
+  the required chain clone → uv sync → model pull → run → offline run and confirmed each step is
+  documented with nothing missing; cross-checked every command/default against the source files.
+  Passed. (Phase 5's verify is explicitly a doc completeness check, not a live run.)
+  ALL AUTONOMOUS PHASES (0–5) NOW COMPLETE. Wrote RALPH_BLOCKED.md with the exact remaining
+  HUMAN steps, created RALPH_DONE + RALPH_BLOCKED markers, and stopped. See the
+  "Remaining HUMAN steps" section below.
+
+## Remaining HUMAN steps (autonomous loop is done — see RALPH_BLOCKED.md)
+These CANNOT be done headless and are the definition-of-done for v1:
+1. **Ollama pull** (Phase 2 second half): `bash scripts/run_ollama.sh` in a normal terminal —
+   pulls `qwen2.5:14b` (~9GB) into `./models/ollama` and serves it. The autonomous loop could not
+   invoke the `ollama` binary (permission-gated headless); the script itself is correct.
+2. **Phase 4 verify** (visibly changes behavior): with the bot running, edit `LLM_MODEL` /
+   `KOKORO_VOICE` in `.env` and confirm the answer/voice changes. (Plumbing was proven in the
+   config.py override test; this box needs a live run.)
+3. **Phase 6 — offline success test** (the actual v1 done criterion): online smoke test (speak,
+   hear a reply, confirm barge-in), then Airplane Mode + local Ollama running → full spoken
+   conversation with zero network calls. Exact steps in RALPH_BLOCKED.md.
