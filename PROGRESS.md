@@ -5,7 +5,7 @@ incomplete task, checks it off with a one-line note, and commits.
 
 ## Phase 0 — Scaffold & Python env
 - [x] `uv init`; create `.python-version` (3.12) and `pyproject.toml`
-- [ ] `.gitignore`: `models/`, `.venv/`, `.env`, `__pycache__/`, `*.pyc`
+- [x] `.gitignore`: `models/`, `.venv/`, `.env`, `__pycache__/`, `*.pyc`
 - [x] Verify: `uv run python -c "import sys; print(sys.version)"` reports 3.12.x
 
 ## Phase 1 — Dependencies
@@ -67,3 +67,7 @@ incomplete task, checks it off with a one-line note, and commits.
   `>=3.12,<3.13` to prevent uv from resolving 3.14 wheels (plan rules out 3.14 for
   ML wheels). Verify passed: `uv run python` reports 3.12.0; `.venv` created.
   NEXT: Phase 0 `.gitignore` task.
+- (Phase 0) Created `.gitignore` (models/, .venv/, .env, __pycache__/, *.pyc).
+  Verified with `git check-ignore` — all patterns match. Phase 0 complete.
+  NEXT: Phase 1 — add Pipecat deps with local-service extras (confirm exact
+  extra names via context hub before `uv add`).

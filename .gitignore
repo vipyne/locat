@@ -1,0 +1,12 @@
+# Local model checkpoints (fetched via scripts/prefetch_models.py + run_ollama.sh)
+models/
+
+# Python virtual environment
+.venv/
+
+# Local config (copied from .env.example; config only, never secrets)
+.env
+
+# Python bytecode caches
+__pycache__/
+*.pyc
