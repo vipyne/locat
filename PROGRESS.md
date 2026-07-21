@@ -20,7 +20,7 @@ incomplete task, checks it off with a one-line note, and commits.
 ## Phase 2 — Model acquisition (online step)
 - [x] `scripts/run_ollama.sh`: export `OLLAMA_MODELS=$PWD/models/ollama`, `ollama serve` (bg),
       `ollama pull qwen2.5:14b` (tag configurable)
-- [ ] `scripts/prefetch_models.py`: with `HF_HOME` → `./models/`, force download of Whisper-MLX,
+- [x] `scripts/prefetch_models.py`: with `HF_HOME` → `./models/`, force download of Whisper-MLX,
       Kokoro, Silero VAD, Smart Turn v3 model files
 - [ ] Verify: `./models/` contains ollama blobs + HF caches + kokoro files; `ollama list` shows
       `qwen2.5:14b` from the repo store
@@ -101,3 +101,30 @@ incomplete task, checks it off with a one-line note, and commits.
   `bash scripts/run_ollama.sh` if the +x bit isn't set. The pull itself (network,
   ~9GB) remains part of the Phase 2 *verify* and is not done yet.
   NEXT: Phase 2 — `scripts/prefetch_models.py` (HF warm-up downloads).
+- (Phase 2) Created `scripts/prefetch_models.py`. Confirmed download behavior via
+  context hub (NOT guessed):
+    * Kokoro `__init__` calls `_ensure_model_files(model_path, voices_path)` →
+      downloads `kokoro-v1.0.onnx` + `voices-v1.0.bin`. Script passes repo-local
+      paths (`./models/kokoro/...`) so files land where the bot will look.
+    * Whisper-MLX `_load` is a NO-OP (downloads lazily on first transcribe into
+      HF_HOME). Script resolves the HF repo id from the enum
+      (`MLXModel[WHISPER_MODEL].value`, default LARGE_V3_TURBO →
+      `mlx-community/whisper-large-v3-turbo`) and `snapshot_download`s it up front.
+    * SURPRISE / plan correction: Silero VAD AND Smart Turn v3 are BUNDLED inside
+      the pipecat package (`.../audio/vad/data/silero_vad.onnx`,
+      `.../audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx`), loaded via
+      importlib.resources — they DO NOT download anything. (Plan assumed v3 fetches
+      from HF; only the deprecated v2 does.) Script still instantiates both as a
+      fast offline load-sanity check.
+  Env knobs (all optional, .env-overridable): HF_HOME (→ ./models/huggingface),
+  WHISPER_MODEL, KOKORO_MODEL_PATH, KOKORO_VOICES_PATH. Sets HF_HOME + kokoro paths
+  BEFORE importing any model lib so caches steer into ./models/.
+  VERIFY (this task = create the script): `py_compile` clean; ran the offline-safe
+  paths with HF_HUB_OFFLINE=1 — MLXModel enum resolves to a valid repo id, and both
+  bundled models load from site-packages with zero network. The actual multi-GB
+  download run (Kokoro + Whisper) is the SEPARATE Phase 2 verify box below and is
+  NOT done yet (needs network + ~1.5GB whisper + ~350MB kokoro).
+  NEXT: Phase 2 verify — run `scripts/run_ollama.sh` (pull qwen2.5:14b) +
+  `uv run python scripts/prefetch_models.py`; confirm `./models/` is populated and
+  `ollama list` shows the model. Network-gated: if unavailable, that's a legit
+  RALPH_BLOCKED (network), not a failure.
