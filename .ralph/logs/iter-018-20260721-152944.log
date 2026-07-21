@@ -1,0 +1,19 @@
+=== ralph iteration 18/25 (20260721-152944) ===
+Committed. This iteration completed **Phase 5 — README**, which was the last autonomous task in the plan.
+
+## What I did
+- Wrote `README.md` documenting the full reproducible path: **clone → `brew install portaudio` + `uv sync` → model pull → run → offline run**, with hardware notes (Apple Silicon / Python 3.12 pinned / Ollama / PortAudio), approximate download sizes (~9 GB LLM, ~1.5 GB Whisper, ~350 MB Kokoro; ~11 GB total), a device-selection one-liner, a 15-row config table, an explicit **no-API-keys / config-only-`.env`** section, repo layout, and the deferred roadmap (memory → RAG → tools).
+- Every command and default was cross-checked against the actual source (`config.py`, `run_ollama.sh`, `prefetch_models.py`, `.env.example`) rather than guessed. I deliberately did **not** reference `select_audio_device.py` — it doesn't exist in the repo despite `.env.example` mentioning it — and documented a real, working pyaudio index-lister instead.
+
+**Verify (Phase 5 = documentation completeness self-check, per PLAN):** walked the required chain and confirmed nothing is missing. Passed. The live offline run itself is Phase 6.
+
+## Status: all autonomous phases (0–5) complete
+The remaining work is **human-gated** and cannot be done headless, so I stopped and handed off:
+- Created `RALPH_DONE` (autonomous build finished) and `RALPH_BLOCKED` + `RALPH_BLOCKED.md` with exact human steps.
+- Consolidated the remaining human steps in `PROGRESS.md`.
+
+**What a human must now do** (details in `RALPH_BLOCKED.md`):
+1. `bash scripts/run_ollama.sh` — pull `qwen2.5:14b` (~9 GB); the loop couldn't run the `ollama` binary.
+2. Online smoke test: `uv run bot.py`, speak, hear a reply, confirm barge-in. *(Flagged: verify VAD/turn config actually drives barge-in through the local transport — a 1.0 migration concern noted during Phase 3.)*
+3. Phase 4 verify: edit `LLM_MODEL` / `KOKORO_VOICE` and confirm behavior changes.
+4. **The offline test** (v1's definition of done): Airplane Mode + local Ollama running → full spoken conversation with zero network calls.
