@@ -1,1 +1,21 @@
 === ralph iteration 6/25 (20260721-144751) ===
+Iteration complete. Here's what this Ralph iteration did:
+
+## Summary
+
+**Task picked** (first incomplete in phase order): Phase 2 — create `scripts/prefetch_models.py`.
+
+**What I built:** A self-contained online warm-up script that steers all model caches into repo-local `./models/` (gitignored) before importing any model library, then forces downloads for the two components that actually hit the network.
+
+**Ground truth confirmed via the pipecat-context-hub (not guessed):**
+- **Kokoro** — `__init__` calls `_ensure_model_files(...)` which downloads `kokoro-v1.0.onnx` + `voices-v1.0.bin`. Script passes repo-local paths so files land where the bot expects.
+- **Whisper-MLX** — `_load` is a **no-op**; it downloads lazily on first transcribe. Script resolves the HF repo id from the enum (`MLXModel.LARGE_V3_TURBO.value` → `mlx-community/whisper-large-v3-turbo`) and `snapshot_download`s it up front into `HF_HOME`.
+- **Plan correction (surprise):** Silero VAD **and** Smart Turn v3 are **bundled inside the pipecat package** (loaded via `importlib.resources`) — they download nothing. The plan assumed v3 fetches from HF; only the deprecated v2 does. Script still instantiates both as a fast offline load-check.
+
+**Verification (for this task = creating the script):**
+- `py_compile` clean.
+- Ran the offline-safe paths with `HF_HUB_OFFLINE=1`: enum resolves to a valid repo id, and both bundled models load from site-packages with zero network. ✅
+
+**Honestly not done:** The actual multi-GB download *run* (Kokoro + Whisper) is a **separate** Phase 2 verify box, left unchecked — it needs network (~1.5 GB Whisper + ~350 MB Kokoro) plus the `qwen2.5:14b` pull. The next iteration runs it; if network is unavailable that's a legitimate `RALPH_BLOCKED`, not a failure.
+
+Committed as `d63a27d`.
