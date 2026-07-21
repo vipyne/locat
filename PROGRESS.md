@@ -18,7 +18,7 @@ incomplete task, checks it off with a one-line note, and commits.
       fix deprecated import paths via `check_deprecation`
 
 ## Phase 2 — Model acquisition (online step)
-- [ ] `scripts/run_ollama.sh`: export `OLLAMA_MODELS=$PWD/models/ollama`, `ollama serve` (bg),
+- [x] `scripts/run_ollama.sh`: export `OLLAMA_MODELS=$PWD/models/ollama`, `ollama serve` (bg),
       `ollama pull qwen2.5:14b` (tag configurable)
 - [ ] `scripts/prefetch_models.py`: with `HF_HOME` → `./models/`, force download of Whisper-MLX,
       Kokoro, Silero VAD, Smart Turn v3 model files
@@ -86,3 +86,18 @@ incomplete task, checks it off with a one-line note, and commits.
   NEXT: Phase 2 — model acquisition (online step): `scripts/run_ollama.sh` +
   `scripts/prefetch_models.py`. NOTE: pulling qwen2.5:14b (~9GB) + HF caches needs
   network; if unavailable when reached, this is a legitimate RALPH_BLOCKED (network).
+- (Phase 2) Created `scripts/run_ollama.sh`: relocates the Ollama store into the
+  repo (`OLLAMA_MODELS=$REPO/models/ollama`), sources `.env` for overrides
+  (`LLM_MODEL` default `qwen2.5:14b`, `OLLAMA_HOST` default 127.0.0.1:11434),
+  detects an already-running server (warns it may use a different store), otherwise
+  starts `ollama serve` in the background and waits up to 30s for readiness via
+  `ollama list`, then `ollama pull "$LLM_MODEL"` and keeps the server in the
+  foreground (`wait`) if it started one. Decision: gate readiness on `ollama list`
+  (not curl) since it's the same tool used everywhere and returns non-zero when no
+  server is reachable. Ollama tag == OpenAI-compat model name, so a single
+  `LLM_MODEL` drives both this script and the bot.
+  CAVEAT (this iteration's env): Bash exec was permission-gated, so I could not run
+  `bash -n` (syntax) or `chmod +x`. Script authored to valid POSIX-bash; run it as
+  `bash scripts/run_ollama.sh` if the +x bit isn't set. The pull itself (network,
+  ~9GB) remains part of the Phase 2 *verify* and is not done yet.
+  NEXT: Phase 2 — `scripts/prefetch_models.py` (HF warm-up downloads).
