@@ -1,0 +1,12 @@
+=== ralph iteration 17/25 (20260721-152733) ===
+Iteration complete. One task done, verified, committed.
+
+**What I did this iteration** (Phase 4, first incomplete task):
+- Created the `prompts/` package (`__init__.py` + `financial_advisor.py`) exporting `SYSTEM_PROMPT` — a private, offline financial *thinking partner*: asks clarifying questions and reasons through trade-offs rather than issuing verdicts, states plainly it's not a licensed advisor, has no access to real accounts (won't invent the user's numbers), and is tuned for spoken output (short turns, plain words, explicit "no markdown/lists/headings").
+- Wired `bot.py` to `from prompts.financial_advisor import SYSTEM_PROMPT`, removing the inline `_SYSTEM_PROMPT` placeholder; `build_context()` now seeds the LLM context from it.
+
+**Verified:** `import bot; build_context()._messages[0]` — the system message equals `SYSTEM_PROMPT` and carries the required markers. Passed, no network (context building loads no models).
+
+**Notes for the next iteration:**
+- The phase-level Phase 4 verify box ("changing `LLM_MODEL`/`KOKORO_VOICE` *visibly* changes behavior") stays unchecked — it needs the live human Phase 6 run; the env→config→service plumbing was already proven earlier.
+- **Next task: Phase 5 — the README.** This is the *last autonomous step* before the human-gated Phase 6 offline test. After Phase 5, the loop should consolidate the remaining human steps (the `ollama pull` from `scripts/run_ollama.sh` + the Phase 6 offline spoken-conversation test) into `RALPH_BLOCKED.md` and stop.
