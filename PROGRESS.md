@@ -38,7 +38,7 @@ incomplete task, checks it off with a one-line note, and commits.
 - [x] TTS: `KokoroTTSService(settings=...(voice=<env>), model_path, voices_path)`
 - [x] Context: current universal LLM context + aggregator (confirm class names via context hub),
       seeded with financial system prompt (inline placeholder for now; Phase 4 swaps in the tuned prompt)
-- [ ] `PipelineTask(..., params=PipelineParams(allow_interruptions=True))`; `PipelineRunner`
+- [x] `PipelineTask(..., params=PipelineParams(allow_interruptions=True))`; `PipelineRunner`
 - [ ] Greeting: bot speaks a short opening line on transport ready
 - [ ] Verify: pipeline assembles / imports without error (full run is Phase 6)
 
@@ -250,3 +250,35 @@ incomplete task, checks it off with a one-line note, and commits.
   transport.input() -> STT -> user-agg -> LLM -> TTS -> transport.output() -> assistant-agg.
   Confirm the Pipeline/PipelineTask/PipelineParams API + interruptions flag via context hub before
   writing.
+- (Phase 3) Added `build_pipeline_task()`, `_configure_logging()`, and `main()` +
+  `if __name__ == "__main__"` to bot.py. Confirmed the API via context hub (NOT guessed):
+  `Pipeline([...])` (list of processors), `PipelineTask(pipeline, *, params=PipelineParams()|None)`,
+  `PipelineRunner(*, handle_sigint=True, ...)`, `await runner.run(task)`.
+  IMPORTANT PLAN CORRECTION (confirmed via the 1.0 migration guide): the plan's
+  `PipelineParams(allow_interruptions=True)` is the REMOVED 0.0.x API. In Pipecat 1.x,
+  `PipelineParams.allow_interruptions` (and `.interruption_strategies`) were REMOVED — turn/
+  interruption management moved onto the user aggregator's `user_turn_strategies`
+  (`LLMUserAggregatorParams`), and interruptions are ON BY DEFAULT. So bot.py uses a bare
+  `PipelineParams()`; passing the old flag would be wrong. Checked the task box because the intent
+  (interruptions + runner) is satisfied the 1.x way.
+  RELATED OPEN CONCERN for a later iteration (NOT this task, so left as-is): the same migration guide
+  says `TransportParams.vad_analyzer`/`turn_analyzer` were "removed" in 1.0 in favor of
+  `LLMUserAggregatorParams.vad_analyzer` + default `TurnAnalyzerUserTurnStopStrategy`. Our
+  `build_transport()` still passes them to `LocalAudioTransportParams` — and it DID construct+link
+  fine on 1.5.0 (the version-pinned API index still lists those fields on TransportParams). Whether
+  the local transport honors them for barge-in, or whether VAD must move to the aggregator's
+  `user_params`, can only be settled by the Phase 6 human run. Flagging it here so a future
+  iteration (or the human test) can revisit if interruptions don't work.
+  DESIGN: `build_pipeline_task()` returns `(transport, task)` so the next task (on-ready greeting)
+  can register a transport event handler without re-plumbing. `main()` loads .env FIRST (so the
+  env-driven builders see config), configures loguru to stderr at LOG_LEVEL (default DEBUG — good
+  for watching the offline run for stray network calls), then runs the task via PipelineRunner
+  (handle_sigint guarded off on Windows). `import bot` stays side-effect-free.
+  VERIFY (exceeded "imports without error", HF_HUB_OFFLINE=1): `import bot` clean, then
+  `build_pipeline_task()` assembled + LINKED all 7 processors (transport.input -> STT ->
+  LLMUserAggregator -> Ollama -> Kokoro -> transport.output -> LLMAssistantAggregator) and returned
+  a real `PipelineTask`, fully offline (Silero VAD + Smart Turn v3 from bundled ONNX, zero network).
+  Did NOT run the task itself — that needs a live mic + Ollama server and is the human-gated Phase 6.
+  NEXT: Phase 3 — greeting: on transport-ready, have the bot speak a short opening line. Confirm the
+  LocalAudioTransport ready/connected event-handler name + how to queue an opening utterance
+  (TTSSpeakFrame vs. seeding an assistant turn / queue_frames) via context hub before writing.

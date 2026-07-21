@@ -15,11 +15,18 @@ Importing this module has no side effects (no audio device access, no model load
 all hardware/model construction happens inside the builder functions and `main()`.
 """
 
+import asyncio
 import os
+import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+from loguru import logger
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -183,3 +190,80 @@ def build_context_aggregator(context: LLMContext) -> LLMContextAggregatorPair:
     Constructing the pair is cheap and offline — no model loads, no network.
     """
     return LLMContextAggregatorPair(context)
+
+
+def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
+    """Assemble the full-duplex pipeline and wrap it in a `PipelineTask`.
+
+    Frame flow (the current Pipecat 1.x universal-context ordering)::
+
+        transport.input() -> STT -> user-aggregator -> LLM -> TTS
+            -> transport.output() -> assistant-aggregator
+
+    The user aggregator folds finalized transcriptions into the shared context
+    before the LLM sees them; the assistant aggregator folds the bot's spoken
+    reply back in after TTS. All services are the local/offline builders above.
+
+    Interruptions (barge-in) are ON BY DEFAULT in Pipecat 1.x — turn management
+    lives in the user aggregator's turn strategies. The 0.0.x-era
+    `PipelineParams(allow_interruptions=True)` flag was REMOVED in Pipecat 1.0
+    (confirmed via the context hub 1.0 migration guide), so we intentionally do
+    NOT pass it; `PipelineParams()` defaults are correct for a local voice bot.
+
+    The transport is returned alongside the task so callers can register
+    transport event handlers (e.g. the on-ready greeting — a later Phase 3 task).
+    """
+    transport = build_transport()
+    stt = build_stt()
+    llm = build_llm()
+    tts = build_tts()
+    context = build_context()
+    user_aggregator, assistant_aggregator = build_context_aggregator(context)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+
+    task = PipelineTask(pipeline, params=PipelineParams())
+    return transport, task
+
+
+def _configure_logging() -> None:
+    """Route Pipecat's loguru output to stderr at LOG_LEVEL (default DEBUG).
+
+    DEBUG is a sensible default here: it surfaces each service's activity, which
+    is exactly what you want to watch during the offline verification (Phase 6)
+    to confirm no service silently reaches the network.
+    """
+    level = os.getenv("LOG_LEVEL", "").strip() or "DEBUG"
+    logger.remove()
+    logger.add(sys.stderr, level=level)
+
+
+async def main() -> None:
+    """Build and run the offline voice bot until interrupted (Ctrl-C / EOF).
+
+    This is the `uv run bot.py` entry point. It loads `.env` (config only — no
+    secrets), assembles the pipeline, and hands the task to a `PipelineRunner`,
+    which manages the asyncio lifecycle and SIGINT/SIGTERM shutdown.
+    """
+    load_dotenv(override=True)
+    _configure_logging()
+
+    _transport, task = build_pipeline_task()
+
+    # handle_sigint is unsupported on Windows event loops; guard it.
+    runner = PipelineRunner(handle_sigint=sys.platform != "win32")
+    await runner.run(task)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
