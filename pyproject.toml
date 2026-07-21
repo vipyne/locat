@@ -2,4 +2,10 @@
 name = "locat"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "loguru>=0.7.3",
+    "pipecat-ai[kokoro,mlx-whisper,ollama,silero,whisper]>=1.5.0",
+    "pyaudio>=0.2.14",
+    "python-dotenv>=1.2.2",
+    "textual>=8.2.8",
+]
