@@ -23,6 +23,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -236,6 +237,41 @@ def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
     return transport, task
 
 
+# Short opening line the bot speaks on startup. Overridable via the GREETING env
+# var. Kept tuned for spoken output (one or two sentences, no markdown). Phase 4
+# owns the full financial thinking-partner personality; this is just the hello.
+_GREETING = (
+    "Hi. I'm your private, offline financial thinking partner. "
+    "What's on your mind today?"
+)
+
+# Seconds to wait before speaking the greeting, giving the local audio output
+# stream time to spin up. Mirrors the 1s delay in Pipecat's own
+# getting-started/01a-local-audio.py example. Overridable via GREETING_DELAY_SECS.
+_GREETING_DELAY_SECS = 1.0
+
+
+async def _speak_greeting(task: PipelineTask) -> None:
+    """Speak a short opening line shortly after the pipeline starts.
+
+    `LocalAudioTransport` does NOT emit an `on_client_connected` event — that
+    event only fires on networked transports (WebSocket/WebRTC/Daily/etc.), so
+    hooking it here would silently never run. Instead, mirroring Pipecat's own
+    `getting-started/01a-local-audio.py`, we wait briefly for the audio output
+    stream to come up, then queue a `TTSSpeakFrame`, which sends the greeting text
+    straight to Kokoro TTS (no LLM round-trip needed for a fixed opening line).
+
+    We intentionally do NOT queue an `EndFrame` after it (that example is a
+    one-shot); this is a conversation, so the pipeline keeps running and listening.
+    """
+    greeting = os.getenv("GREETING", "").strip() or _GREETING
+    delay_raw = os.getenv("GREETING_DELAY_SECS", "").strip()
+    delay = float(delay_raw) if delay_raw else _GREETING_DELAY_SECS
+
+    await asyncio.sleep(delay)
+    await task.queue_frames([TTSSpeakFrame(greeting)])
+
+
 def _configure_logging() -> None:
     """Route Pipecat's loguru output to stderr at LOG_LEVEL (default DEBUG).
 
@@ -262,7 +298,12 @@ async def main() -> None:
 
     # handle_sigint is unsupported on Windows event loops; guard it.
     runner = PipelineRunner(handle_sigint=sys.platform != "win32")
-    await runner.run(task)
+
+    # Run the pipeline and the on-startup greeting concurrently: the greeting
+    # coroutine waits for the audio output stream to come up, then queues the
+    # opening line. (LocalAudioTransport has no ready event to hook — see
+    # `_speak_greeting`.)
+    await asyncio.gather(runner.run(task), _speak_greeting(task))
 
 
 if __name__ == "__main__":
