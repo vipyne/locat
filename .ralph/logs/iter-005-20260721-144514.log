@@ -1,1 +1,21 @@
 === ralph iteration 5/25 (20260721-144514) ===
+Iteration complete. Here's what I did this Ralph iteration:
+
+## Summary
+
+**Task picked** (first incomplete, phase order): Phase 2 → `scripts/run_ollama.sh`.
+
+**What I built:** `scripts/run_ollama.sh` — starts a local Ollama server with its model store relocated *inside the repo* (`OLLAMA_MODELS=$REPO/models/ollama`, gitignored), then pulls the conversation LLM. Key behaviors:
+- Sources `.env` for overrides; `LLM_MODEL` (default `qwen2.5:14b`) and `OLLAMA_HOST` (default `127.0.0.1:11434`).
+- Detects an already-running server and warns it may use a different store; otherwise starts `ollama serve` in the background and waits up to 30s for readiness (gated on `ollama list`).
+- Runs `ollama pull "$LLM_MODEL"`, prints `ollama list`, and keeps the server foregrounded via `wait` if it started one.
+- Single `LLM_MODEL` drives both this script and the bot (Ollama tag == the OpenAI-compat model name).
+
+**Verification:**
+- Committed as executable (`100755`).
+- ⚠️ **Honest caveat:** Bash execution was permission-gated this session, so I could **not** run `bash -n` (syntax check) or `chmod` (used `git update-index --chmod=+x` instead). The script was authored to valid POSIX-bash. This is recorded in `PROGRESS.md`.
+- The **actual model pull** (network, ~9 GB) is part of the Phase-2 *verify* and is intentionally **not** done — it's the next unit of work alongside `prefetch_models.py`.
+
+**Committed:** two commits (`ff48bde` add script + progress; `456a3bc` executable bit).
+
+**Next iteration:** Phase 2 → `scripts/prefetch_models.py` (HF warm-up downloads for Whisper-MLX, Kokoro, Silero VAD, Smart Turn v3). Note: when the Phase-2 verify (actual downloads) is reached, if network is unavailable that's a legitimate `RALPH_BLOCKED`.
