@@ -16,9 +16,13 @@ all hardware/model construction happens inside the builder functions and `main()
 """
 
 import asyncio
-import os
 import sys
-from pathlib import Path
+
+# Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
+# Kokoro cache paths) at import time, and Hugging Face freezes its cache root when
+# huggingface_hub is imported, so this ordering is what makes the bot read the
+# prefetched ./models/huggingface weights offline.
+import config
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -41,33 +45,20 @@ from pipecat.transports.local.audio import (
 )
 
 
-def _env_device_index(name: str) -> int | None:
-    """Read a PyAudio device index from the environment.
-
-    Returns None (use the system default device) when the var is unset or blank.
-    Phase 4 will move this into config.py; kept inline here so the transport task
-    stands alone.
-    """
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return None
-    return int(raw)
-
-
 def build_transport() -> LocalAudioTransport:
     """Build the local audio transport with VAD + smart-turn turn-taking.
 
     - Silero VAD detects speech vs. silence (enables barge-in / interruptions).
     - Local Smart Turn v3 decides when the user has actually finished their turn.
       Both models are bundled with pipecat and load from local ONNX — no network.
-    - Device indices come from INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX (default:
-      the system default input/output devices).
+    - Device indices come from config (INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX;
+      default: the system default input/output devices).
     """
     params = LocalAudioTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        input_device_index=_env_device_index("INPUT_DEVICE_INDEX"),
-        output_device_index=_env_device_index("OUTPUT_DEVICE_INDEX"),
+        input_device_index=config.input_device_index(),
+        output_device_index=config.output_device_index(),
         vad_analyzer=SileroVADAnalyzer(),
         turn_analyzer=LocalSmartTurnAnalyzerV3(),
     )
@@ -89,8 +80,7 @@ def build_stt() -> WhisperSTTServiceMLX:
     Construction is cheap and offline: MLX Whisper loads the weights lazily on
     the first transcription (from HF_HOME), so no network happens here.
     """
-    model_name = os.getenv("WHISPER_MODEL", "").strip() or "LARGE_V3_TURBO"
-    model = MLXModel[model_name]
+    model = MLXModel[config.whisper_model()]
     return WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))
 
 
@@ -110,19 +100,10 @@ def build_llm() -> OLLamaLLMService:
     `model=` constructor arg is deprecated as of Pipecat 0.0.105. Construction does
     not contact the server — connection happens when the pipeline runs.
     """
-    model = os.getenv("LLM_MODEL", "").strip() or "qwen2.5:14b"
-    base_url = os.getenv("OLLAMA_BASE_URL", "").strip() or "http://localhost:11434/v1"
     return OLLamaLLMService(
-        settings=OLLamaLLMService.Settings(model=model),
-        base_url=base_url,
+        settings=OLLamaLLMService.Settings(model=config.llm_model()),
+        base_url=config.ollama_base_url(),
     )
-
-
-# Repo-local Kokoro cache, matching where scripts/prefetch_models.py downloads to
-# (./models/kokoro/…). Pinning these makes the bot find the prefetched files
-# offline instead of re-downloading into the default kokoro-onnx cache.
-_REPO_ROOT = Path(__file__).resolve().parent
-_KOKORO_DIR = _REPO_ROOT / "models" / "kokoro"
 
 
 def build_tts() -> KokoroTTSService:
@@ -141,19 +122,10 @@ def build_tts() -> KokoroTTSService:
     Uses the current `settings=KokoroTTSService.Settings(voice=...)` API; the bare
     `voice_id=` constructor arg is deprecated as of Pipecat 0.0.105.
     """
-    voice = os.getenv("KOKORO_VOICE", "").strip() or "af_heart"
-    model_path = (
-        os.getenv("KOKORO_MODEL_PATH", "").strip()
-        or str(_KOKORO_DIR / "kokoro-v1.0.onnx")
-    )
-    voices_path = (
-        os.getenv("KOKORO_VOICES_PATH", "").strip()
-        or str(_KOKORO_DIR / "voices-v1.0.bin")
-    )
     return KokoroTTSService(
-        settings=KokoroTTSService.Settings(voice=voice),
-        model_path=model_path,
-        voices_path=voices_path,
+        settings=KokoroTTSService.Settings(voice=config.kokoro_voice()),
+        model_path=config.kokoro_model_path(),
+        voices_path=config.kokoro_voices_path(),
     )
 
 
@@ -237,20 +209,6 @@ def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
     return transport, task
 
 
-# Short opening line the bot speaks on startup. Overridable via the GREETING env
-# var. Kept tuned for spoken output (one or two sentences, no markdown). Phase 4
-# owns the full financial thinking-partner personality; this is just the hello.
-_GREETING = (
-    "Hi. I'm your private, offline financial thinking partner. "
-    "What's on your mind today?"
-)
-
-# Seconds to wait before speaking the greeting, giving the local audio output
-# stream time to spin up. Mirrors the 1s delay in Pipecat's own
-# getting-started/01a-local-audio.py example. Overridable via GREETING_DELAY_SECS.
-_GREETING_DELAY_SECS = 1.0
-
-
 async def _speak_greeting(task: PipelineTask) -> None:
     """Speak a short opening line shortly after the pipeline starts.
 
@@ -264,12 +222,8 @@ async def _speak_greeting(task: PipelineTask) -> None:
     We intentionally do NOT queue an `EndFrame` after it (that example is a
     one-shot); this is a conversation, so the pipeline keeps running and listening.
     """
-    greeting = os.getenv("GREETING", "").strip() or _GREETING
-    delay_raw = os.getenv("GREETING_DELAY_SECS", "").strip()
-    delay = float(delay_raw) if delay_raw else _GREETING_DELAY_SECS
-
-    await asyncio.sleep(delay)
-    await task.queue_frames([TTSSpeakFrame(greeting)])
+    await asyncio.sleep(config.greeting_delay_secs())
+    await task.queue_frames([TTSSpeakFrame(config.greeting())])
 
 
 def _configure_logging() -> None:
@@ -279,9 +233,8 @@ def _configure_logging() -> None:
     is exactly what you want to watch during the offline verification (Phase 6)
     to confirm no service silently reaches the network.
     """
-    level = os.getenv("LOG_LEVEL", "").strip() or "DEBUG"
     logger.remove()
-    logger.add(sys.stderr, level=level)
+    logger.add(sys.stderr, level=config.log_level())
 
 
 async def main() -> None:
