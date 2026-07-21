@@ -19,6 +19,7 @@ import os
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 from pipecat.transports.local.audio import (
     LocalAudioTransport,
@@ -77,3 +78,27 @@ def build_stt() -> WhisperSTTServiceMLX:
     model_name = os.getenv("WHISPER_MODEL", "").strip() or "LARGE_V3_TURBO"
     model = MLXModel[model_name]
     return WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))
+
+
+def build_llm() -> OLLamaLLMService:
+    """Build the local Ollama large-language-model service.
+
+    `OLLamaLLMService` extends `OpenAILLMService` and talks to a locally running
+    Ollama server over its OpenAI-compatible endpoint — no API key, no cloud. The
+    model tag (LLM_MODEL, default `qwen2.5:14b`) is the same string used by
+    `scripts/run_ollama.sh` to `ollama pull`, so the bot and the pull agree.
+
+    The endpoint comes from OLLAMA_BASE_URL (default `http://localhost:11434/v1`).
+    Note the trailing `/v1`: this is the OpenAI-compatible path, not the native
+    Ollama API root.
+
+    Uses the current `settings=OLLamaLLMService.Settings(model=...)` API; the bare
+    `model=` constructor arg is deprecated as of Pipecat 0.0.105. Construction does
+    not contact the server — connection happens when the pipeline runs.
+    """
+    model = os.getenv("LLM_MODEL", "").strip() or "qwen2.5:14b"
+    base_url = os.getenv("OLLAMA_BASE_URL", "").strip() or "http://localhost:11434/v1"
+    return OLLamaLLMService(
+        settings=OLLamaLLMService.Settings(model=model),
+        base_url=base_url,
+    )
