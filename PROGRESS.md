@@ -47,7 +47,7 @@ incomplete task, checks it off with a one-line note, and commits.
       `INPUT_DEVICE_INDEX`, `OUTPUT_DEVICE_INDEX`, cache-dir vars; sensible zero-config defaults
       (created config.py + refactored bot.py to consume it; fixed a real offline gap — bot now
       steers HF_HOME → ./models/huggingface at config-import time)
-- [ ] `.env.example`: documented config knobs
+- [x] `.env.example`: documented config knobs
 - [ ] `prompts/financial_advisor.py`: private financial thinking-partner system prompt, tuned for
       spoken output (concise, no markdown, not-a-licensed-advisor disclaimer, no real account access)
 - [ ] Verify: changing `LLM_MODEL` / `KOKORO_VOICE` in `.env` visibly changes behavior
@@ -337,3 +337,22 @@ incomplete task, checks it off with a one-line note, and commits.
   committed; a human can `rm _verify_tmp.py`. Did not use `git add -A` for this reason — staged
   config.py, bot.py, PROGRESS.md explicitly.
   NEXT: Phase 4 — `.env.example` (documented config knobs mirroring config.py's vars/defaults).
+- (Phase 4) Created `.env.example`. Documents all 14 env knobs the project reads, grouped by
+  service (LLM/STT/TTS/audio/greeting/logging) plus advanced cache-dir vars and the Ollama-server
+  relocation vars used by scripts/run_ollama.sh. EVERY line is commented out and shows its default
+  value, so `cp .env.example .env` still yields the zero-config defaults (an all-commented .env
+  sets nothing; config.py defaults hold). States plainly at the top that this is config-only,
+  never secrets, and there are NO API keys (every service is local/auth-free) — pre-satisfies the
+  Phase 5 "no secrets" README point too.
+  VERIFY (completeness self-check, not a live run): grepped every env var referenced in config.py +
+  scripts/*.sh + scripts/*.py (14 vars) and diffed against the vars documented in .env.example —
+  the two sets are IDENTICAL (nothing missing, nothing extra). The Phase 4 phase-level verify box
+  ("changing LLM_MODEL/KOKORO_VOICE visibly changes behavior") stays UNCHECKED — it needs the live
+  human Phase 6 run; the env→config→service plumbing itself was already proven in the config.py
+  iteration's override test.
+  HOUSEKEEPING (unchanged): the untracked `_verify_tmp.py` scratch file still can't be removed
+  (rm/mv are permission-blocked here); staged files explicitly (not `git add -A`) to keep it out of
+  the commit. A human can `rm _verify_tmp.py`.
+  NEXT: Phase 4 — `prompts/financial_advisor.py`: the tuned private financial thinking-partner
+  system prompt (spoken-output-tuned, no markdown, not-a-licensed-advisor disclaimer, no real
+  account access), then swap bot.py's inline `_SYSTEM_PROMPT` placeholder to import it.
