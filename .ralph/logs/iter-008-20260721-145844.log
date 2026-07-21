@@ -1,1 +1,21 @@
 === ralph iteration 8/25 (20260721-145844) ===
+Iteration complete. One task done, verified, committed.
+
+## Summary
+
+**Task picked (first incomplete):** Phase 3 — Transport wiring for `bot.py`.
+
+**What I did:**
+- Confirmed all three constructors against Pipecat 1.5.0 via `pipecat-context-hub` (no guessing):
+  - `LocalAudioTransportParams` → `input_device_index`, `output_device_index` + inherited `audio_in/out_enabled`, `vad_analyzer`, `turn_analyzer`
+  - `SileroVADAnalyzer()` — no-arg OK
+  - `LocalSmartTurnAnalyzerV3()` — no-arg OK, loads bundled `smart-turn-v3.2-cpu.onnx` (V2/CoreML are deprecated; V3 is current)
+- Created `bot.py` with a `build_transport()` function. Kept it import-side-effect-free (no PyAudio/model loads at import), device indices read from env inline (config.py is Phase 4).
+
+**Verification (exceeded the plan's "imports without error"):** `import bot` is clean *and* `build_transport()` actually constructs — Silero VAD + Smart Turn v3 load from bundled local ONNX, PyAudio inits, transport exposes `.input()`/`.output()`. Fully offline, zero network.
+
+**Committed:** `fdb2a5b`
+
+**Next iteration:** Phase 3 STT sub-task — `WhisperSTTServiceMLX`, confirming the settings class + `MLXModel` default (large-v3-turbo, already prefetched) via the context hub before writing.
+
+Note: the Ollama model pull (`qwen2.5:14b`) remains a deferred human step — it's runtime-only and doesn't block Phases 3–5.
