@@ -1,1 +1,20 @@
 === ralph iteration 13/25 (20260721-151026) ===
+Iteration complete. Here's what this iteration did:
+
+## Summary
+
+**Task done (Phase 3):** Assembled the full-duplex pipeline + `PipelineTask` + `PipelineRunner` + `main()` entry point in `bot.py`.
+
+**Key plan correction (confirmed via context hub, not guessed):** The plan specified `PipelineParams(allow_interruptions=True)`, but the Pipecat **1.0 migration guide** confirms that field was **removed** — in Pipecat 1.x interruptions are on by default via the user aggregator's turn strategies (`LLMUserAggregatorParams`). So `bot.py` uses a bare `PipelineParams()`; passing the old flag would have been wrong.
+
+**What I added:**
+- `build_pipeline_task()` — wires `transport.input() → STT → user-agg → LLM → TTS → transport.output() → assistant-agg` into a `Pipeline`, wraps it in a `PipelineTask`, and returns `(transport, task)` so the next task (on-ready greeting) can register a transport event handler.
+- `_configure_logging()` + `main()` + `if __name__ == "__main__"` — loads `.env` first, logs to stderr at `LOG_LEVEL` (default DEBUG), runs via `PipelineRunner` (SIGINT guarded off on Windows).
+
+**Verification (passed, fully offline with `HF_HUB_OFFLINE=1`):** `import bot` stays side-effect-free; `build_pipeline_task()` assembled and **linked all 7 processors** and returned a real `PipelineTask` with zero network. The runner itself wasn't run — that needs a live mic + Ollama server, which is the human-gated Phase 6.
+
+**Flagged for a later iteration / the human test:** the 1.0 migration guide also says `TransportParams.vad_analyzer`/`turn_analyzer` moved to the aggregator, yet `build_transport()` still passes them to `LocalAudioTransportParams` and it constructs+links fine on 1.5.0. Whether the local transport honors them for barge-in can only be settled by the Phase 6 human run — noted in `PROGRESS.md`.
+
+**Next task:** Phase 3 greeting — bot speaks a short opening line on transport-ready.
+
+Committed as `ec2e680`.
