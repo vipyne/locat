@@ -1,1 +1,11 @@
 === vpio-spike iteration 7/25 (20260722-161958) ===
+Done for this iteration. I completed **Phase 1's final task**: recording the chosen approach in `SPIKE_PROGRESS.md` and committing it (`6f2a9f3`).
+
+**What this iteration did:** All four approach assessments were already finished by prior iterations, so this was a consolidation task. I wrote the Phase 1 decision entry into the findings log:
+
+- **Chosen: Approach 1** — AVAudioEngine + `setVoiceProcessingEnabled(true)` via PyObjC. It's backed by a 13/13-check local probe, its `installTap` delivers mic buffers to a plain Python callable off the real-time audio thread, and an Apple engineer explicitly recommends this API for macOS echo cancellation (forums thread 733733).
+- Approach 2 (raw `AUVoiceProcessingIO` via ctypes) is recorded as a fallback only — reachable but requires GIL-holding callbacks on the real-time thread. Approach 4 (software WebRTC APM) stays rejected — no Apple Silicon binding builds and Pipecat's filter API can't supply the far-end reference.
+- **Only dependency needed:** `pyobjc-framework-AVFoundation` 12.2.1, already isolated in the spike venv.
+- The entry also carries five concrete design constraints into Phase 2 (same-engine playback for the AEC reference, 48 kHz/5-ch input format conversion, explicit engine teardown, built-in mic+speakers pairing, expected VP gain reduction).
+
+**Phase 1 is now fully complete.** The next iteration starts Phase 2: writing the smallest standalone A/B prototype (`spike-vpio/aec_prototype.py`, VP on vs off with an RMS echo measure). Since actually running it needs speakers, a quiet room, and a human to report numbers, that iteration should also write `VPIO_BLOCKED.md` with exact test steps and stop for the human gate.
