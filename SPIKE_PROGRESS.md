@@ -24,7 +24,9 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
       (`.venv/lib/python3.12/site-packages/pipecat/transports/local/audio.py`,
       `base_input.py`, `base_output.py`) and record the interface a VPIO transport must
       implement (approach 3 groundwork) — DONE, full interface spec in findings 2026-07-22
-- [ ] Record chosen approach + required packages in Findings, with cited sources
+- [x] Record chosen approach + required packages in Findings, with cited sources —
+      CHOSEN: approach 1 (AVAudioEngine + `setVoiceProcessingEnabled` via PyObjC);
+      see consolidated decision entry 2026-07-22
 
 ### Phase 2 — Standalone AEC prototype
 - [ ] Smallest script in `spike-vpio/` that opens VPIO capture+render, plays a known clip
@@ -323,3 +325,46 @@ AVAudioEngine + `setVoiceProcessingEnabled` via PyObjC, per the three assessment
 above) + required packages (`pyobjc-framework-AVFoundation` 12.2.1) as a short
 consolidated entry with cited sources, then move to Phase 2 (standalone AEC
 prototype script in `spike-vpio/`).
+
+### 2026-07-22 — Phase 1 COMPLETE: chosen approach recorded → APPROACH 1 (AVAudioEngine VP via PyObjC)
+
+**Decision (consolidates the four assessments above):**
+
+| Approach | Verdict | Key evidence |
+|---|---|---|
+| 1. AVAudioEngine + `setVoiceProcessingEnabled` (PyObjC) | **CHOSEN** | 13/13 local probe checks passed (`probe_avaudioengine.py`); VP enables cleanly; `installTap` accepts a Python callable and runs OFF the RT thread; Apple engineer explicitly recommends this API for AEC (forums 733733) |
+| 2. `AUVoiceProcessingIO` via ctypes | Rejected (fallback only) | Reachable (4/4 probe checks, `probe_auvpio_ctypes.py`) but requires render callbacks on the RT audio thread → Python/GIL priority inversion by construction; only public example is broken |
+| 3. Custom Pipecat transport | Not an alternative — it's the *integration layer* for approach 1 | Full Pipecat 1.5.0 interface contract recorded above (transport-read entry, 2026-07-22) |
+| 4. Software WebRTC APM (`audio_in_filter`) | Rejected | No Apple Silicon binding builds (swig / `absl::Nullable` failures, verified); Pipecat filter API has no far-end reference input |
+
+**Required packages (spike venv only, already installed there):**
+- `pyobjc-framework-AVFoundation==12.2.1` (pulls `pyobjc-framework-Cocoa`, `-CoreAudio`,
+  `-CoreMedia`, `-Quartz`). No brew/system deps. Phase 3 would add the same single
+  dependency to the main project as an optional extra behind `AUDIO_BACKEND=vpio`.
+
+**Design constraints carried into Phase 2 (from the assessments above):**
+1. TTS playback MUST go through the same VP-enabled engine
+   (`AVAudioPlayerNode → mainMixerNode → outputNode`) — that's what gives AEC its
+   reference (forums 733733).
+2. Post-VP input format on this machine is 48 kHz / 5-ch deinterleaved Float32 →
+   need channel-0 select + 48k→16k resample for Pipecat.
+3. Stop the engine explicitly before interpreter exit (probe hung on implicit HAL
+   teardown, needed SIGKILL).
+4. Built-in mic + built-in speakers only for testing (mismatched devices fail with
+   aggregate-channel errors, forums 810129/772006).
+5. Expect VP-on gain reduction (forums 721535) — measure RMS ratios, not absolutes.
+
+**Sources:** all cited inline in the four assessment entries above (Apple forums
+733733, 810129, 772006, 721535, 651361; Apple AVFoundation/AudioToolbox docs; PyPI
+JSON API for the three APM bindings; local probes `probe_avaudioengine.py` 13/13 and
+`probe_auvpio_ctypes.py` 4/4; installed Pipecat 1.5.0 source).
+
+**Next step:** Phase 2, first task — write the smallest standalone script in
+`spike-vpio/` (e.g. `aec_prototype.py`) that: builds one VP-enabled `AVAudioEngine`,
+schedules a known tone/clip on an `AVAudioPlayerNode` through the speakers, taps the
+input node, records captured audio to WAV + computes RMS, runnable with VP on vs off
+(`--no-vp` flag) for an A/B echo measure. Note: first live capture run will trigger
+the macOS mic TCC permission prompt for the terminal — the run itself is HUMAN-GATED
+(speakers + quiet room), so the iteration that writes the script should also write
+`VPIO_BLOCKED.md` with exact run steps + numbers to report, create `VPIO_BLOCKED`,
+and stop.
