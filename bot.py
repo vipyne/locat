@@ -16,7 +16,10 @@ all hardware/model construction happens inside the builder functions and `main()
 """
 
 import asyncio
+import json
 import sys
+import urllib.error
+import urllib.request
 
 # Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
 # Kokoro cache paths) at import time, and Hugging Face freezes its cache root when
@@ -26,16 +29,17 @@ import config
 
 from dotenv import load_dotenv
 from loguru import logger
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
 )
+from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.workers.runner import WorkerRunner
 from pipecat.services.kokoro.tts import KokoroTTSService
 from pipecat.services.ollama.llm import OLLamaLLMService
 from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
@@ -48,23 +52,54 @@ from prompts.financial_advisor import SYSTEM_PROMPT
 
 
 def build_transport() -> LocalAudioTransport:
-    """Build the local audio transport with VAD + smart-turn turn-taking.
+    """Build the local audio transport (mic in + speaker out).
 
-    - Silero VAD detects speech vs. silence (enables barge-in / interruptions).
-    - Local Smart Turn v3 decides when the user has actually finished their turn.
-      Both models are bundled with pipecat and load from local ONNX — no network.
     - Device indices come from config (INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX;
       default: the system default input/output devices).
+
+    IMPORTANT (Pipecat 1.5 architecture): VAD and turn-taking are NOT configured
+    on the transport. `TransportParams` has no `vad_analyzer`/`turn_analyzer`
+    fields, and (because Pydantic ignores unknown kwargs here) passing them is
+    silently dropped — the classic failure where the bot hears nothing. VAD is a
+    pipeline processor (`VADProcessor`, see `build_vad_processor`) placed right
+    after `transport.input()`; smart-turn is applied automatically by the LLM
+    user aggregator's default turn strategies (see `build_context_aggregator`).
     """
     params = LocalAudioTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         input_device_index=config.input_device_index(),
         output_device_index=config.output_device_index(),
-        vad_analyzer=SileroVADAnalyzer(),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(),
     )
     return LocalAudioTransport(params)
+
+
+def build_vad_processor() -> VADProcessor:
+    """Build the Silero VAD pipeline processor (Pipecat 1.5 turn-taking source).
+
+    Placed immediately after `transport.input()`, this emits
+    `VADUserStartedSpeakingFrame` / `VADUserStoppedSpeakingFrame` downstream. Those
+    frames drive three things: the segmented Whisper STT (which transcribes a
+    segment on speech-stop), barge-in interruptions, and the user aggregator's
+    turn strategies (including local Smart Turn v3, applied by default).
+
+    VAD tuning matters for portability: Pipecat gates speech on Silero's neural
+    confidence AND an absolute EBU-R128 loudness (`min_volume`). The loudness gate
+    is level-sensitive, so its stock 0.6 default makes quiet mics (and different
+    machines) fail to register speech. We drive `VADParams` from config, defaulting
+    `min_volume=0.0` (gate off) so turn detection is level-independent and works
+    across mics without per-machine calibration. See `config.vad_*` / `.env`.
+    """
+    return VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(
+            params=VADParams(
+                confidence=config.vad_confidence(),
+                min_volume=config.vad_min_volume(),
+                start_secs=config.vad_start_secs(),
+                stop_secs=config.vad_stop_secs(),
+            )
+        )
+    )
 
 
 def build_stt() -> WhisperSTTServiceMLX:
@@ -162,28 +197,31 @@ def build_context_aggregator(context: LLMContext) -> LLMContextAggregatorPair:
     return LLMContextAggregatorPair(context)
 
 
-def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
-    """Assemble the full-duplex pipeline and wrap it in a `PipelineTask`.
+def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineWorker]:
+    """Assemble the full-duplex pipeline and wrap it in a `PipelineWorker`.
 
-    Frame flow (the current Pipecat 1.x universal-context ordering)::
+    Frame flow (the Pipecat 1.5 universal-context ordering)::
 
-        transport.input() -> STT -> user-aggregator -> LLM -> TTS
+        transport.input() -> VADProcessor -> STT -> user-aggregator -> LLM -> TTS
             -> transport.output() -> assistant-aggregator
 
-    The user aggregator folds finalized transcriptions into the shared context
-    before the LLM sees them; the assistant aggregator folds the bot's spoken
-    reply back in after TTS. All services are the local/offline builders above.
+    The `VADProcessor` sits right after the input and emits speech start/stop
+    frames. Those drive the segmented Whisper STT (transcribe on stop), barge-in
+    interruptions, and the user aggregator's turn strategies (local Smart Turn v3
+    by default). The user aggregator folds finalized transcriptions into the shared
+    context before the LLM sees them; the assistant aggregator folds the bot's
+    spoken reply back in after TTS. All services are the local/offline builders.
 
-    Interruptions (barge-in) are ON BY DEFAULT in Pipecat 1.x — turn management
-    lives in the user aggregator's turn strategies. The 0.0.x-era
-    `PipelineParams(allow_interruptions=True)` flag was REMOVED in Pipecat 1.0
-    (confirmed via the context hub 1.0 migration guide), so we intentionally do
-    NOT pass it; `PipelineParams()` defaults are correct for a local voice bot.
+    Why VAD is its own processor (not a transport param): in Pipecat 1.5 the local
+    transport does NOT accept `vad_analyzer`/`turn_analyzer`; VAD lives in the
+    pipeline. Interruptions are on by default once VAD frames flow, so we pass a
+    plain `PipelineParams()`.
 
-    The transport is returned alongside the task so callers can register
-    transport event handlers (e.g. the on-ready greeting — a later Phase 3 task).
+    The transport is returned alongside the worker so callers can register
+    transport event handlers / queue the on-ready greeting.
     """
     transport = build_transport()
+    vad = build_vad_processor()
     stt = build_stt()
     llm = build_llm()
     tts = build_tts()
@@ -193,6 +231,7 @@ def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
     pipeline = Pipeline(
         [
             transport.input(),
+            vad,
             stt,
             user_aggregator,
             llm,
@@ -202,11 +241,11 @@ def build_pipeline_task() -> tuple[LocalAudioTransport, PipelineTask]:
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams())
-    return transport, task
+    worker = PipelineWorker(pipeline, params=PipelineParams())
+    return transport, worker
 
 
-async def _speak_greeting(task: PipelineTask) -> None:
+async def _speak_greeting(worker: PipelineWorker) -> None:
     """Speak a short opening line shortly after the pipeline starts.
 
     `LocalAudioTransport` does NOT emit an `on_client_connected` event — that
@@ -220,7 +259,7 @@ async def _speak_greeting(task: PipelineTask) -> None:
     one-shot); this is a conversation, so the pipeline keeps running and listening.
     """
     await asyncio.sleep(config.greeting_delay_secs())
-    await task.queue_frames([TTSSpeakFrame(config.greeting())])
+    await worker.queue_frames([TTSSpeakFrame(config.greeting())])
 
 
 def _configure_logging() -> None:
@@ -234,26 +273,64 @@ def _configure_logging() -> None:
     logger.add(sys.stderr, level=config.log_level())
 
 
+def _preflight_llm(model: str, base_url: str) -> None:
+    """Fail fast with a clear message if the local LLM isn't usable.
+
+    A missing Ollama server or un-pulled model otherwise fails silently mid-turn
+    (the LLM call errors and nothing is spoken), which is confusing. We check up
+    front against the OpenAI-compatible `/models` endpoint and exit with actionable
+    guidance if the server is unreachable or the configured model isn't present.
+    """
+    url = base_url.rstrip("/") + "/models"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost)
+            models = json.load(resp).get("data", [])
+    except (urllib.error.URLError, OSError) as exc:
+        sys.exit(
+            f"\n✖ Cannot reach the local LLM server at {base_url}\n"
+            f"  Start Ollama first:  ./scripts/run_ollama.sh   (or: ollama serve)\n"
+            f"  Details: {exc}\n"
+        )
+
+    available = {str(m.get("id", "")) for m in models}
+    # Ollama reports tags like 'llama3:latest'; match the bare name too.
+    if not any(model == m or model.split(":")[0] == m.split(":")[0] for m in available):
+        listed = ", ".join(sorted(available)) or "(none)"
+        sys.exit(
+            f"\n✖ LLM model '{model}' is not available in Ollama at {base_url}\n"
+            f"  Pull it:            ollama pull {model}\n"
+            f"  Or set LLM_MODEL in .env to one you have: {listed}\n"
+        )
+    logger.info(f"LLM preflight OK: '{model}' available at {base_url}")
+
+
 async def main() -> None:
     """Build and run the offline voice bot until interrupted (Ctrl-C / EOF).
 
     This is the `uv run bot.py` entry point. It loads `.env` (config only — no
-    secrets), assembles the pipeline, and hands the task to a `PipelineRunner`,
+    secrets), assembles the pipeline, and hands the worker to a `WorkerRunner`,
     which manages the asyncio lifecycle and SIGINT/SIGTERM shutdown.
     """
     load_dotenv(override=True)
     _configure_logging()
 
-    _transport, task = build_pipeline_task()
+    # Fail fast (with guidance) if the local LLM server/model isn't ready, rather
+    # than silently producing no spoken reply when the first turn hits the LLM.
+    _preflight_llm(config.llm_model(), config.ollama_base_url())
+
+    _transport, worker = build_pipeline_task()
 
     # handle_sigint is unsupported on Windows event loops; guard it.
-    runner = PipelineRunner(handle_sigint=sys.platform != "win32")
+    runner = WorkerRunner(handle_sigint=sys.platform != "win32")
 
-    # Run the pipeline and the on-startup greeting concurrently: the greeting
-    # coroutine waits for the audio output stream to come up, then queues the
-    # opening line. (LocalAudioTransport has no ready event to hook — see
-    # `_speak_greeting`.)
-    await asyncio.gather(runner.run(task), _speak_greeting(task))
+    # Register the worker, then run the runner and the on-startup greeting
+    # concurrently: the greeting coroutine waits for the audio output stream to
+    # come up, then queues the opening line. (LocalAudioTransport has no ready
+    # event to hook — see `_speak_greeting`.) Passing the worker straight to
+    # `run()` still works but is deprecated since 1.3.0; `add_workers()` then
+    # `run()` is the current 1.5 API.
+    await runner.add_workers(worker)
+    await asyncio.gather(runner.run(), _speak_greeting(worker))
 
 
 if __name__ == "__main__":

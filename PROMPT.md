@@ -16,6 +16,15 @@ state. Read them before doing anything.
    (extra names, context-aggregator API, `MLXModel` enum members, Smart Turn args, Kokoro voice),
    use the `pipecat-context-hub` MCP tools (`search_api`, `search_docs`, `search_examples`,
    `get_example`, `check_deprecation`) to get ground truth first.
+   - **The context-hub index LAGS the installed Pipecat version.** (Installed is 1.5.0; the hub
+     indexed ~1.0-era and still presents `PipelineTask`/`PipelineRunner` as current — they are
+     deprecated since 1.3.0 in favor of `PipelineWorker`/`WorkerRunner`.) So: get the *concept*
+     from the hub, but **verify exact class/param names against the installed source** in
+     `.venv/lib/python3.12/site-packages/pipecat/` (grep it). **When the hub and the installed
+     package disagree, the installed package wins**, and always prefer the non-deprecated symbol
+     (check for `.. deprecated::` / `DeprecationWarning` in the source before using something).
+   - After writing code that runs, **treat any `DeprecationWarning` in the output as a task**:
+     grep the installed source for the replacement and switch to it before checking the phase off.
 5. **Run that task's `Verify` step** from `PLAN.md`. If it fails, fix it this iteration. Do not
    check the task off until its verification actually passes.
 6. **Update `PROGRESS.md`**: check off what you completed and add a one-line note — what you did,

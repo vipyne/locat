@@ -1,0 +1,36 @@
+2026-07-21 18:33:28.078 | INFO     | pipecat:<module>:54 - ᓚᘏᗢ Pipecat 1.5.0 (Python 3.12.0 (main, Oct  2 2023, 20:56:14) [Clang 16.0.3 ]) ᓚᘏᗢ
+2026-07-21 18:33:30.626 | INFO     | __main__:_preflight_llm:283 - LLM preflight OK: 'llama3' available at http://localhost:11434/v1
+2026-07-21 18:33:30.626 | DEBUG    | pipecat.audio.vad.silero:__init__:146 - Loading Silero VAD model...
+2026-07-21 18:33:30.674 | DEBUG    | pipecat.audio.vad.silero:__init__:168 - Loaded Silero VAD
+2026-07-21 18:33:30.674 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:68 - Loading Local Smart Turn v3.x model from /Users/vipyned2/Documents/repos/vipyne/locat/.venv/lib/python3.12/site-packages/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx...
+2026-07-21 18:33:30.697 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:78 - Loaded Local Smart Turn v3.x
+2026-07-21 18:33:30.735 | DEBUG    | pipecat.services.ollama.llm:create_client:88 - Creating Ollama client with api http://localhost:11434/v1
+2026-07-21 18:33:31.087 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:68 - Loading Local Smart Turn v3.x model from /Users/vipyned2/Documents/repos/vipyne/locat/.venv/lib/python3.12/site-packages/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx...
+2026-07-21 18:33:31.104 | DEBUG    | pipecat.audio.turn.smart_turn.local_smart_turn_v3:__init__:78 - Loaded Local Smart Turn v3.x
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#0::Source -> LocalAudioInputTransport#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LocalAudioInputTransport#0 -> WhisperSTTServiceMLX#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking WhisperSTTServiceMLX#0 -> LLMUserAggregator#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LLMUserAggregator#0 -> OLLamaLLMService#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking OLLamaLLMService#0 -> KokoroTTSService#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking KokoroTTSService#0 -> LocalAudioOutputTransport#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LocalAudioOutputTransport#0 -> LLMAssistantAggregator#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking LLMAssistantAggregator#0 -> Pipeline#0::Sink
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking PipelineWorker#0::Source -> RTVIProcessor#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking RTVIProcessor#0 -> Pipeline#0
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.processors.frame_processor:link:566 - Linking Pipeline#0 -> PipelineWorker#0::Sink
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.workers.runner:add_workers:214 - WorkerRunner 'runner-3f7cf781': added worker 'PipelineWorker#0'
+2026-07-21 18:33:31.105 | DEBUG    | pipecat.workers.runner:run:258 - WorkerRunner 'runner-3f7cf781': started running
+2026-07-21 18:33:31.106 | ERROR    | pipecat.utils.startup:_load_module:55 - error loading setup file /Users/vipyned2/Documents/repos/pipecat-ai/pipecat-setup-files.py: No module named 'pipecat_whisker'
+2026-07-21 18:33:31.106 | DEBUG    | pipecat.workers.runner:_start_worker:414 - WorkerRunner 'runner-3f7cf781': starting worker 'PipelineWorker#0'
+2026-07-21 18:33:31.107 | ERROR    | pipecat.utils.startup:_load_module:55 - error loading setup file /Users/vipyned2/Documents/repos/pipecat-ai/pipecat-setup-files.py: No module named 'pipecat_whisker'
+2026-07-21 18:33:31.107 | DEBUG    | pipecat.pipeline.worker:_wait_for_pipeline_start:965 - PipelineWorker#0: Starting. Waiting for StartFrame#0 to reach the end of the pipeline...
+2026-07-21 18:33:31.163 | WARNING  | pipecat.services.stt_service:service_metadata_frame:507 - WhisperSTTServiceMLX#0: ttfs_p99_latency not set, using default 1.0s
+2026-07-21 18:33:31.197 | DEBUG    | pipecat.registry.registry:register:132 - Worker 'PipelineWorker#0' ready (local)
+2026-07-21 18:33:31.197 | DEBUG    | pipecat.workers.runner:_send_registry:466 - WorkerRunner 'runner-3f7cf781': broadcasting registry: ['PipelineWorker#0']
+2026-07-21 18:33:31.197 | DEBUG    | pipecat.workers.base_worker:_maybe_activate:1075 - Worker 'PipelineWorker#0': activated
+2026-07-21 18:33:31.197 | DEBUG    | pipecat.pipeline.worker:_wait_for_pipeline_start:968 - PipelineWorker#0: StartFrame#0 reached the end of the pipeline, pipeline is now ready.
+2026-07-21 18:33:32.108 | DEBUG    | pipecat.services.kokoro.tts:run_tts:221 - KokoroTTSService#0: Generating TTS [Hi. I'm your private, offline financial thinking partner. What's on your mind today?]
+2026-07-21 18:33:33.236 | DEBUG    | pipecat.services.tts_service:push_frame:838 - KokoroTTSService#0 cleaning up TTS context c473ed28-aa52-4b8a-83d6-98217c1aa683
+2026-07-21 18:33:33.237 | DEBUG    | pipecat.transports.base_output:_bot_started_speaking:672 - Bot started speaking
+2026-07-21 18:33:38.119 | DEBUG    | pipecat.transports.base_output:_handle_frame:766 - Bot stopped speaking based on TTSStoppedFrame
+2026-07-21 18:33:38.119 | DEBUG    | pipecat.transports.base_output:_bot_stopped_speaking:700 - Bot stopped speaking
