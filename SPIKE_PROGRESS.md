@@ -13,7 +13,9 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
 - [x] Assess approach 1: AVAudioEngine + `setVoiceProcessingEnabled(true)` via PyObjC
       (feasibility of pulling processed mic buffers into Python AND rendering TTS output
       through the same engine) — FEASIBLE, verified by local probe; see findings 2026-07-22
-- [ ] Assess approach 2: `AUVoiceProcessingIO` audio unit via AudioToolbox/ctypes or PyObjC
+- [x] Assess approach 2: `AUVoiceProcessingIO` audio unit via AudioToolbox/ctypes or PyObjC
+      — REACHABLE from ctypes (4/4 probe checks) but INFERIOR to approach 1: RT-thread
+      render callbacks vs Python/GIL; see findings 2026-07-22
 - [ ] Assess approach 4 (fallback): software WebRTC APM binding (`webrtc-audio-processing`)
       as `audio_in_filter` with playback reference
 - [ ] Read installed Pipecat transport source
@@ -120,3 +122,53 @@ via AudioToolbox/ctypes). Given the Apple-engineer recommendation above, this ca
 brief desk assessment (is it worth the extra complexity vs approach 1?) — note the
 gist https://gist.github.com/d08f98b14328baa5eddbdf98d0ab8b91 (ObjC AUGraph +
 VoiceProcessingIO) whose own input callback comment says "Not being called at all".
+
+### 2026-07-22 — Phase 1: approach 2 assessed (AUVoiceProcessingIO via ctypes) → REACHABLE BUT INFERIOR, not chosen
+**What was tried:** desk research + a minimal ctypes probe,
+`spike-vpio/probe_auvpio_ctypes.py` (no new deps — plain `ctypes.CDLL` on the
+AudioToolbox framework).
+
+**Probe results (4/4 checks passed, clean process exit — no HAL hang this time):**
+- `AudioComponentFindNext(auou/vpio/appl)` finds the VoiceProcessingIO component.
+- `AudioComponentInstanceNew` → status 0; `AudioUnitSetProperty(EnableIO, input
+  scope, bus 1)` → status 0; `AudioUnitInitialize` → status 0.
+- So the component is fully reachable/instantiable from pure-Python ctypes.
+
+**Why it is NOT the chosen approach (the hard part is not reachability):**
+- Driving an output audio unit requires `AURenderCallback`s that fire on the
+  **real-time audio thread**. A ctypes `CFUNCTYPE` callback there must acquire the
+  Python GIL on the RT thread → priority inversion / glitches by construction.
+  Approach 1's `installTap` deliberately delivers buffers OFF the RT thread (the
+  same reason the Apple engineer in forums thread 733733 recommends AVAudioEngine +
+  tap over raw `AudioDeviceIOProc`-style CoreAudio).
+- The only public VPIO-via-AUGraph example found (gist
+  d08f98b14328baa5eddbdf98d0ab8b91, Objective-C) is itself broken — its render
+  callback is annotated "Not being called at all" and a 2018 commenter's "does this
+  work?" went unanswered. Even in ObjC this path is fiddly.
+- Extra manual plumbing vs approach 1: device binding
+  (`kAudioOutputUnitProperty_CurrentDevice`), AudioBufferList construction, format
+  negotiation, all via hand-written ctypes structs.
+- Related friction datapoint: Apple forums thread 651361 (AudioUnit APIs inside a
+  Python process) hit component-enumeration anomalies (only system AUs visible);
+  not blocking here (vpio IS a system AU and we found it), but a sign this layer
+  misbehaves inside Python hosts.
+
+**Sources:**
+- https://developer.apple.com/documentation/audiotoolbox/kaudiounitsubtype_voiceprocessingio
+- https://developer.apple.com/forums/thread/733733 (Apple engineer: prefer
+  AVAudioEngine + tap; tap runs off the RT thread)
+- https://developer.apple.com/forums/thread/651361 (AudioUnit enumeration anomalies
+  inside Python extension)
+- https://gist.github.com/d08f98b14328baa5eddbdf98d0ab8b91 (broken ObjC AUGraph +
+  VPIO example)
+- Local probe: `spike-vpio/probe_auvpio_ctypes.py` (4/4 OK)
+
+**Conclusion:** Approach 2 is feasible-in-principle but strictly more work and more
+RT-thread risk than approach 1 for zero extra benefit (same underlying VPIO DSP).
+Keep only as a fallback if approach 1's tap cadence proves unusable in Phase 2.
+
+**Next step:** Phase 1, next unchecked task — assess approach 4 (fallback): software
+WebRTC APM binding (`webrtc-audio-processing` / `pywebrtc-audio-processing`) as a
+Pipecat `audio_in_filter` fed the playback reference. Desk assessment: does a
+maintained Python binding exist for Apple Silicon, and can Pipecat's filter API
+supply the far-end reference signal?
