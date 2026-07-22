@@ -1,1 +1,14 @@
 === vpio-spike iteration 3/25 (20260722-160750) ===
+**Iteration complete: Phase 1, approach 1 (AVAudioEngine + `setVoiceProcessingEnabled` via PyObjC) is assessed → FEASIBLE, and it's the front-runner.**
+
+What this iteration did:
+
+1. **Researched real sources** (Apple dev forums + docs). Key facts: voice processing requires input and output routed through the *same* engine (so TTS must play via an `AVAudioPlayerNode` in that engine, not PyAudio); it works with built-in mic → built-in speakers but fails with mismatched devices like AirPods mic + MacBook speakers; a gain drop is expected and can't be fully disabled; an Apple engineer explicitly recommends AVAudioEngine + input-node tap over raw CoreAudio.
+
+2. **Ran a live local probe** (`spike-vpio/probe_avaudioengine.py`, spike venv only — added `pyobjc-framework-AVFoundation` 12.2.1). All 13 checks passed: `setVoiceProcessingEnabled_error_(True, None)` succeeded, the output node auto-enabled as documented, and — the crux — `installTapOnBus:...block:` accepts a **plain Python function as the ObjC block**, so pulling processed mic buffers into Python is bridgeable. Two caveats recorded: the VP input format on this machine is 5-channel 48 kHz Float32 (needs conversion to 16 kHz mono for Pipecat), and the probe process hung on interpreter exit after touching the HAL (exit 137 — prototypes must stop the engine explicitly).
+
+3. **Recorded everything** in `SPIKE_PROGRESS.md` with citations, checked off the task, and committed.
+
+Next iteration's task: a brief desk assessment of approach 2 (`AUVoiceProcessingIO` via AudioToolbox) — expected to lose to approach 1 given Apple's own recommendation, then on to the fallback assessment and Pipecat transport reading.
+
+Sources: [Apple forums 733733](https://developer.apple.com/forums/thread/733733), [810129](https://developer.apple.com/forums/thread/810129), [772006](https://developer.apple.com/forums/thread/772006), [721535](https://developer.apple.com/forums/thread/721535), [ducking config docs](https://developer.apple.com/documentation/avfaudio/avaudioinputnode/voiceprocessingotheraudioduckingconfiguration), [VoiceProcessingIO gist](https://gist.github.com/d08f98b14328baa5eddbdf98d0ab8b91)
