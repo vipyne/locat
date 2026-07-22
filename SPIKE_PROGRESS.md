@@ -6,7 +6,7 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
 ## Checklist
 
 ### Phase 0 — Scaffold
-- [ ] Create `spike-vpio/` directory for all prototype code (spike-local venv via `uv`;
+- [x] Create `spike-vpio/` directory for all prototype code (spike-local venv via `uv`;
       keep spike deps out of the main project)
 
 ### Phase 1 — Research & choose approach
@@ -46,4 +46,16 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
 
 (append per-iteration: what was tried, what happened — numbers/errors, conclusion, next step)
 
-_No findings yet. First real iteration starts at Phase 0._
+### 2026-07-22 — Phase 0: scaffold `spike-vpio/`
+- Created `spike-vpio/` with `pyproject.toml` (uv project, `requires-python >=3.12`,
+  **zero deps** — deps get added in Phase 1 once an approach is chosen), `README.md`,
+  and `.gitignore` (ignores `spike-vpio/.venv/`, `__pycache__/`, `*.wav`).
+- Verified isolation: `uv venv && uv sync` inside `spike-vpio/` succeeded;
+  `uv run python -c "print(sys.prefix)"` → `spike-vpio/.venv` (CPython 3.12.0),
+  i.e. NOT the main bot's root `.venv`. Main project untouched.
+- No system/brew deps needed yet.
+- **Next step:** Phase 1, first unchecked task — assess approach 1
+  (AVAudioEngine + `setVoiceProcessingEnabled(true)` via PyObjC): can we pull
+  processed mic buffers into Python (installTap / render callback) AND play TTS
+  output through the same engine so AEC has its reference signal? Use
+  WebSearch/WebFetch on Apple docs + PyObjC and cite sources here.
