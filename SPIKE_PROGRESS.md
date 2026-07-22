@@ -20,10 +20,10 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
       as `audio_in_filter` with playback reference — NOT VIABLE: no binding installs on
       macOS arm64 (verified build failures), and Pipecat's filter API has no far-end
       reference input; see findings 2026-07-22
-- [ ] Read installed Pipecat transport source
+- [x] Read installed Pipecat transport source
       (`.venv/lib/python3.12/site-packages/pipecat/transports/local/audio.py`,
       `base_input.py`, `base_output.py`) and record the interface a VPIO transport must
-      implement (approach 3 groundwork)
+      implement (approach 3 groundwork) — DONE, full interface spec in findings 2026-07-22
 - [ ] Record chosen approach + required packages in Findings, with cited sources
 
 ### Phase 2 — Standalone AEC prototype
@@ -234,3 +234,92 @@ not software AEC.
 record the exact interface a VPIO transport must implement (approach 3 groundwork):
 constructor params, `push_audio_frame`/`write_audio_frame` contracts, sample-rate
 negotiation, and where start/stop hooks live.
+
+### 2026-07-22 — Phase 1: Pipecat 1.5.0 transport interface read → VPIO transport contract recorded
+**What was done:** read the installed Pipecat 1.5.0 source (NOT the context hub, which
+lags 1.5.x): `pipecat/transports/local/audio.py`, `base_input.py`, `base_output.py`,
+`base_transport.py`, plus `pipeline/worker.py` + `frames/frames.py` for sample-rate
+defaults, and `bot.py` (read-only) for how the transport is constructed today.
+
+**The interface a `VPIOTransport` must implement (approach 3):**
+
+*Top level — subclass `BaseTransport` (`base_transport.py:92`):*
+- Implement `input() -> FrameProcessor` and `output() -> FrameProcessor`, returning
+  cached instances (see `LocalAudioTransport.input/output`, `local/audio.py:215-233`).
+- Params: subclass `TransportParams` (pydantic, `base_transport.py:25`); bot.py sets
+  only `audio_in_enabled=True, audio_out_enabled=True` + device indices
+  (`bot.py:69-75`). NOTE `TransportParams` silently ignores unknown kwargs (pydantic);
+  bot.py:62-64 already documents that gotcha.
+- KEY STRUCTURAL DIFFERENCE vs `LocalAudioTransport`: input and output must share ONE
+  `AVAudioEngine` (AEC needs the playout reference in the same engine). So the
+  `VPIOTransport` owns the engine + player node and hands references to both sides —
+  engine start must be idempotent (both sides' `start()` fire on the same StartFrame)
+  and engine stop must happen explicitly in whichever `cleanup()` runs (guarded),
+  given the probe's known hang-on-implicit-teardown.
+
+*Input side — subclass `BaseInputTransport` (`base_input.py:36`):*
+- `__init__(params)` → `super().__init__(params)`.
+- `async start(frame: StartFrame)`: MUST first `await super().start(frame)` (base sets
+  `self._sample_rate = params.audio_in_sample_rate or frame.audio_in_sample_rate`,
+  `base_input.py:128`, and starts any `audio_in_filter`); then set up capture; then
+  MUST `await self.set_transport_ready(frame)` — that call creates the internal
+  `_audio_in_queue` + processing task (`base_input.py:177-184,255-259`); skipping it
+  makes `push_audio_frame` crash (queue doesn't exist).
+- Delivery contract (from `LocalAudioInputTransport._audio_in_callback`,
+  `local/audio.py:103-113`): from the capture-callback thread, build
+  `InputAudioRawFrame(audio=<int16 mono bytes>, sample_rate=self._sample_rate,
+  num_channels=params.audio_in_channels)` and hand it to the loop via
+  `asyncio.run_coroutine_threadsafe(self.push_audio_frame(frame),
+  self.get_event_loop())`. PyAudio uses 20 ms chunks; cadence is flexible (frames go
+  through an asyncio queue; only a 0.5 s no-audio warning timeout,
+  `base_input.py:33`). The AVAudioEngine tap block (runs off the RT thread — safe for
+  Python) must convert its 48 kHz 5-ch deinterleaved Float32 buffers (probe finding
+  above) → 16 kHz mono int16 before pushing: take channel 0, resample 48k→16k
+  (3:1 integer ratio — trivial decimation after low-pass, or `AVAudioConverter`).
+- Base class handles everything downstream: VAD/filter/passthrough
+  (`base_input.py:267-297`), stop/pause/cancel. Override `cleanup()` → `await
+  super().cleanup()` then explicitly stop tap/engine.
+
+*Output side — subclass `BaseOutputTransport` (`base_output.py:60`):*
+- `async start(frame)`: `await super().start(frame)` (base sets `_sample_rate =
+  params.audio_out_sample_rate or frame.audio_out_sample_rate` and
+  `_audio_chunk_size` = 10 ms bytes × `audio_out_10ms_chunks` (default 4 → 40 ms
+  chunks), `base_output.py:129-135`); then set up playback; then `await
+  self.set_transport_ready(frame)` (spins up the `MediaSender` machinery and pushes
+  `OutputTransportReadyFrame` upstream, `base_output.py:161-202`).
+- Implement `async write_audio_frame(frame: OutputAudioRawFrame) -> bool`
+  (`base_output.py:241`): called by the MediaSender audio task with exactly
+  `_audio_chunk_size` bytes of int16 mono ALREADY resampled to the transport's out
+  rate (MediaSender resamples every incoming frame, `base_output.py:588-590` — the
+  VPIO side never sees the TTS's native rate). Return True on success (False stops
+  downstream propagation, which the assistant context aggregator relies on).
+- BACKPRESSURE IS THE CONTRACT: PyAudio's blocking `stream.write` in a 1-thread
+  executor (`local/audio.py:174-188`) is what paces the whole send loop and keeps
+  interruption latency at ~1 chunk. `AVAudioPlayerNode.scheduleBuffer:` is
+  fire-and-forget, so the VPIO output must await a completion-handler-released
+  semaphore to keep ≤1–2 chunks in flight, or barge-in will let seconds of scheduled
+  TTS keep playing (base interruption handling only stops FUTURE writes by
+  cancelling the audio task, `base_output.py:548-575`; already-scheduled audio is the
+  transport's problem — consider `playerNode.stop()` on interruption, hooked via the
+  input side or a small override of `_handle_frame` for `InterruptionFrame`).
+- int16 → Float32 conversion into an `AVAudioPCMBuffer` at the player node's format;
+  the engine's mixer handles 24 kHz → hardware-rate conversion if the buffer/node
+  format is declared as 24 kHz mono Float32.
+
+*Sample-rate negotiation:* bot.py uses default `PipelineParams()` (`bot.py:249`) →
+StartFrame carries `audio_in_sample_rate=16000`, `audio_out_sample_rate=24000`
+(`pipeline/worker.py:160-161`, `frames/frames.py:923-924`). So the VPIO transport
+must deliver 16 kHz mono int16 in, accept 24 kHz mono int16 out — matching today's
+behavior with zero bot.py changes beyond the `AUDIO_BACKEND=vpio` switch.
+
+**Conclusion:** the Pipecat side is small and well-defined — two subclasses, one
+`write_audio_frame`, one capture→`push_audio_frame` bridge, both formats known. The
+real engineering risks stay on the AVFoundation side: (a) tap cadence/latency,
+(b) output backpressure + interruption flush via `AVAudioPlayerNode`, (c) 5-ch→mono
+selection. All three are exactly what the Phase 2 standalone prototype exercises.
+
+**Next step:** Phase 1, last unchecked task — record the CHOSEN approach (approach 1:
+AVAudioEngine + `setVoiceProcessingEnabled` via PyObjC, per the three assessments
+above) + required packages (`pyobjc-framework-AVFoundation` 12.2.1) as a short
+consolidated entry with cited sources, then move to Phase 2 (standalone AEC
+prototype script in `spike-vpio/`).
