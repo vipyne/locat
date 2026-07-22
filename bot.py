@@ -49,6 +49,7 @@ from pipecat.transports.local.audio import (
 )
 
 from prompts.financial_advisor import SYSTEM_PROMPT
+from spoken_text_filter import SpokenTextFilter
 
 
 def build_transport() -> LocalAudioTransport:
@@ -163,6 +164,10 @@ def build_tts() -> KokoroTTSService:
         settings=KokoroTTSService.Settings(voice=config.kokoro_voice()),
         model_path=config.kokoro_model_path(),
         voices_path=config.kokoro_voices_path(),
+        # Deterministically speak money/percent/large numbers ("$3,000" ->
+        # "three thousand dollars") instead of relying on the LLM to spell them
+        # out — small local models won't do it reliably. See spoken_text_filter.py.
+        text_filters=[SpokenTextFilter()],
     )
 
 
