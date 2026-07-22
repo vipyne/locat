@@ -5,4 +5,6 @@ description = "Spike: macOS Voice Processing I/O (VPIO) echo cancellation protot
 requires-python = ">=3.12"
 # Deps intentionally empty until Phase 1 chooses an approach
 # (candidates: pyobjc-framework-AVFoundation, pyobjc-framework-CoreAudio, numpy).
-dependencies = []
+dependencies = [
+    "pyobjc-framework-avfoundation>=12.2.1",
+]
