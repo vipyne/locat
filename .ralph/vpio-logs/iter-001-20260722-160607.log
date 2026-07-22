@@ -1,0 +1,6 @@
+=== vpio-spike iteration 1/25 (20260722-160607) ===
+`SPIKE_PROGRESS.md` did not exist, so per the loop rules this iteration only seeded it and stopped.
+
+I created the checklist from the plan's phases (0: scaffold `spike-vpio/`; 1: research the four approaches and read the installed Pipecat transport source; 2: standalone AEC prototype with a human-gated echo measurement; 3: Pipecat integration behind `AUDIO_BACKEND=vpio`; 4: findings + KEEP/DROP decision), added a findings log section for future iterations, and committed it as `ead98f7`.
+
+The next iteration will pick up the first unchecked task: creating the `spike-vpio/` scaffold with a spike-local venv.
