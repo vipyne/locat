@@ -1,1 +1,9 @@
 === vpio-spike iteration 2/25 (20260722-160645) ===
+Phase 0 is complete and committed (`2f43606`). This iteration did exactly one task: scaffolded `spike-vpio/` as an isolated uv project.
+
+What was done:
+- Created `spike-vpio/` with `pyproject.toml` (Python ≥3.12, deliberately zero dependencies — those get chosen in Phase 1), a README explaining the spike-local workflow, and a `.gitignore` covering `.venv/` and audio artifacts.
+- Verified isolation: `uv venv && uv sync` succeeded inside the directory, and `uv run python` confirmed `sys.prefix` points at `spike-vpio/.venv` (CPython 3.12.0), not the main bot's root `.venv`. `bot.py` and main deps are untouched.
+- Checked off the Phase 0 box in `SPIKE_PROGRESS.md` and appended a findings-log entry, including the handoff for the next iteration: Phase 1's first task — assess AVAudioEngine + `setVoiceProcessingEnabled(true)` via PyObjC, specifically whether Python can both tap processed mic buffers and render TTS through the same engine so the echo canceller has its playback reference.
+
+Stopping here per the one-task-per-iteration rule.
