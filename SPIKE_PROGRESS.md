@@ -29,11 +29,14 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
       see consolidated decision entry 2026-07-22
 
 ### Phase 2 — Standalone AEC prototype
-- [ ] Smallest script in `spike-vpio/` that opens VPIO capture+render, plays a known clip
+- [x] Smallest script in `spike-vpio/` that opens VPIO capture+render, plays a known clip
       through speakers while capturing mic, and computes a numeric echo measure
-      (e.g. captured RMS, VPIO on vs off)
+      (e.g. captured RMS, VPIO on vs off) — DONE: `spike-vpio/aec_prototype.py`
+      (hardware-free parts verified; see findings 2026-07-22)
 - [ ] HUMAN-GATED: write exact test steps + numbers-to-report into `VPIO_BLOCKED.md`,
       create empty `VPIO_BLOCKED`, stop; then record human-reported numbers here
+      — steps written + `VPIO_BLOCKED` created 2026-07-22; WAITING on human-reported
+      numbers (do NOT proceed past this until they appear below or in a commit)
 - [ ] Conclude: does VPIO measurably reduce echo? (If not after ~2 rounds → record
       infeasibility finding and jump to Phase 4 with a DROP recommendation)
 
@@ -368,3 +371,40 @@ the macOS mic TCC permission prompt for the terminal — the run itself is HUMAN
 (speakers + quiet room), so the iteration that writes the script should also write
 `VPIO_BLOCKED.md` with exact run steps + numbers to report, create `VPIO_BLOCKED`,
 and stop.
+
+### 2026-07-22 — Phase 2: AEC prototype script written; hardware-free parts verified; HUMAN-GATED handoff
+**What was built:** `spike-vpio/aec_prototype.py` — the smallest A/B echo measure per
+the plan. One VP-enabled `AVAudioEngine`; speech clip (macOS `say`, offline) looped
+through `AVAudioPlayerNode → mainMixerNode → outputNode` (same engine = AEC reference);
+`installTap` on the input node (format=None → node's own format, channel 0 extracted);
+per-run metrics printed: baseline (room-noise) RMS vs playback-window RMS →
+**echo-over-noise dB** (within-run ratio, robust to VPIO's known gain reduction), plus
+tap cadence stats (callback count, mean/max gap — Phase 2 unknown (a)). Captured audio
+saved to `capture_vp-{on,off}.wav`. `--no-vp` is the control run. Ends with explicit
+`player.stop()/removeTap/engine.stop()` then `os._exit(0)` (the probe's known
+HAL-teardown hang; results print first).
+
+**Verified WITHOUT hardware this iteration (all in the spike venv, no new deps):**
+- `--selftest` (no engine start, no mic/TCC): fills an `AVAudioPCMBuffer` with a sine
+  from Python and reads it back via `floatChannelData()[ch].as_buffer(n*4)` —
+  **PASS, max round-trip error 1.48e-08**, `as_buffer` strategy works. This was the
+  last PyObjC bridging unknown (reading/writing raw sample memory); it's now proven.
+  (`channel_floats`/`fill_channel` also have ctypes-address and indexed fallbacks.)
+- Clip path: `say -o clip.aiff` + `AVAudioFile.initForReading` + `readIntoBuffer` →
+  1 ch @ 22050 Hz, 187868 frames (~8.5 s), RMS 0.143 — real speech samples load into
+  the PCM buffer. (`clip.aiff`/`*.wav` gitignored.)
+- Gotcha fixed during testing: prints were lost when piped because `os._exit` skips
+  stdout flushing — script now flushes explicitly before hard exit.
+
+**HUMAN-GATED handoff (as required — never fake audio verification):**
+`VPIO_BLOCKED.md` written with exact setup (built-in mic+speakers ONLY, quiet room,
+volume 60–75%), the two commands (vp-on, `--no-vp`), the TCC-prompt caveat (first run
+invalid if the mic dialog appeared mid-capture — re-run), and the numbers to report
+(the two `=== RESULTS ===` blocks; key number = echo-over-noise dB per run; also tap
+mean/max gap and any `[tap] extraction error`). Empty `VPIO_BLOCKED` marker created.
+
+**Next step (for the iteration after the human runs it):** record the reported numbers
+in the Phase 2 checklist item above, then conclude "does VPIO measurably reduce echo?"
+— vp-off echo-over-noise should be strongly positive, vp-on near zero; the difference
+is the echo reduction. If the tap cadence is unusable or AEC shows no reduction, that
+feeds the ~2-round time-box toward a DROP finding.
