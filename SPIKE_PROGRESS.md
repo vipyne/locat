@@ -16,8 +16,10 @@ Shared state for the amnesiac spike loop. Each iteration: pick the FIRST uncheck
 - [x] Assess approach 2: `AUVoiceProcessingIO` audio unit via AudioToolbox/ctypes or PyObjC
       — REACHABLE from ctypes (4/4 probe checks) but INFERIOR to approach 1: RT-thread
       render callbacks vs Python/GIL; see findings 2026-07-22
-- [ ] Assess approach 4 (fallback): software WebRTC APM binding (`webrtc-audio-processing`)
-      as `audio_in_filter` with playback reference
+- [x] Assess approach 4 (fallback): software WebRTC APM binding (`webrtc-audio-processing`)
+      as `audio_in_filter` with playback reference — NOT VIABLE: no binding installs on
+      macOS arm64 (verified build failures), and Pipecat's filter API has no far-end
+      reference input; see findings 2026-07-22
 - [ ] Read installed Pipecat transport source
       (`.venv/lib/python3.12/site-packages/pipecat/transports/local/audio.py`,
       `base_input.py`, `base_output.py`) and record the interface a VPIO transport must
@@ -172,3 +174,63 @@ WebRTC APM binding (`webrtc-audio-processing` / `pywebrtc-audio-processing`) as 
 Pipecat `audio_in_filter` fed the playback reference. Desk assessment: does a
 maintained Python binding exist for Apple Silicon, and can Pipecat's filter API
 supply the far-end reference signal?
+
+### 2026-07-22 — Phase 1: approach 4 assessed (software WebRTC APM as audio_in_filter) → NOT VIABLE, fallback rejected
+**What was tried:** (a) surveyed PyPI for WebRTC APM bindings and checked their wheel
+platforms via the PyPI JSON API; (b) empirically attempted installs into the isolated
+spike venv (`uv pip install --python spike-vpio/.venv/bin/python <pkg>`); (c) read the
+installed Pipecat 1.5.0 filter/transport source to see whether a filter can even get
+the far-end (playback) reference.
+
+**Packaging results (both fronts fail on Apple Silicon):**
+- `webrtc-audio-processing` 0.1.3 (xiongyihui): DEAD — last sdist 2018, only wheels are
+  cp27/cp36 **linux_armv7l** (2019). Install attempt on this M4 Pro fails immediately:
+  `error: command 'swig' failed: No such file or directory` (needs swig via brew, and
+  even then it wraps a ~2016 APM snapshot; not pursued further — unmaintained).
+- `aec-audio-processing` 1.0.1 (Sept 2025, the only *active* AEC binding found): ships
+  **Windows-only wheels** (cp311–313 win_amd64) + sdist. The sdist build on macOS arm64
+  compiles vendored webrtc via meson/ninja and FAILS: repeated
+  `../webrtc/api/scoped_refptr.h:82: error: no template named 'Nullable' in namespace
+  'absl'` (×3 per TU) — vendored webrtc expects an abseil with `absl::Nullable/Nonnull`,
+  incompatible with what the build resolves here. Fixing = pinning/patching abseil in
+  someone else's vendored C++ build → "excessive effort" territory for a *fallback*.
+- `webrtc-noise-gain` 1.3.0 (rhasspy, maintained): **no AEC at all** (NS + AGC only)
+  and no macOS wheels in the latest release. Not applicable.
+- Nothing was actually installed into the spike venv (both installs failed cleanly);
+  no brew deps added. (swig, and likely a matching abseil, WOULD be needed to go
+  further — deliberately not installed.)
+
+**Architectural result (the deeper blocker, independent of packaging):**
+- Pipecat's filter interface `BaseAudioFilter.filter(audio: bytes) -> bytes`
+  (`pipecat/audio/filters/base_audio_filter.py`) receives ONLY near-end mic bytes.
+  `base_input.py:281-283` applies it inline on input frames. There is **no far-end
+  reference input anywhere in the filter API** — but WebRTC APM AEC requires the
+  played-back signal, time-aligned to ~10 ms frames.
+- Output goes through a separate PyAudio stream in `LocalAudioOutputTransport.
+  write_audio_frame` (`pipecat/transports/local/audio.py:174-185`, blocking write in an
+  executor). Feeding an APM would mean hand-wiring a ring buffer from the output
+  transport into the input filter AND estimating device playout latency (PyAudio gives
+  only coarse `get_output_latency()`); software AEC quality collapses when the
+  reference is misaligned. That is custom-transport-scale work (≈ approach 3) stacked
+  on top of an unmaintained C++ build — strictly worse than approach 1, where the OS
+  sees the true playout timeline for free.
+
+**Sources:**
+- https://pypi.org/project/webrtc-audio-processing/ (release history: 2018/2019, armv7l only)
+- https://pypi.org/project/aec-audio-processing/ (1.0.1, 2025-09-01, win_amd64 wheels only)
+- https://pypi.org/project/webrtc-noise-gain/ (1.3.0, NS+AGC only, no echo cancellation)
+- Local build logs (swig failure; absl::Nullable compile errors) — reproduced 2026-07-22
+- Installed source: `.venv/.../pipecat/audio/filters/base_audio_filter.py`,
+  `.venv/.../pipecat/transports/base_input.py:281`, `.../transports/local/audio.py:174`
+
+**Conclusion:** Approach 4 is REJECTED as a fallback: no maintained Apple Silicon
+binding exists (verified by real install attempts), and Pipecat's `audio_in_filter`
+API structurally cannot deliver the far-end reference an APM needs. If approach 1's
+tap fails in Phase 2, the honest alternative is headphones/interruption-tuning (DROP),
+not software AEC.
+
+**Next step:** Phase 1, next unchecked task — read installed Pipecat transport source
+(`.venv/.../pipecat/transports/local/audio.py`, `base_input.py`, `base_output.py`) and
+record the exact interface a VPIO transport must implement (approach 3 groundwork):
+constructor params, `push_audio_frame`/`write_audio_frame` contracts, sample-rate
+negotiation, and where start/stop hooks live.
