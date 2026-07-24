@@ -10,3 +10,29 @@ models/
 # Python bytecode caches
 __pycache__/
 *.pyc
+
+# Runtime + debug logs
+*.log
+.ralph/
+
+# Ralph-loop / spike run-state sentinels (created at runtime)
+RALPH_DONE
+RALPH_BLOCKED
+RALPH_BLOCKED.md
+VPIO_DONE
+VPIO_BLOCKED
+VPIO_BLOCKED.md
+
+# Scratch/temp
+_verify_tmp.py
+
+# Ralph-loop runtime progress journal (regenerated on each run)
+PROGRESS.md
+
+# VPIO echo-cancellation spike (kept locally, not part of the public example)
+spike-vpio/
+SPIKE_VPIO.md
+SPIKE_FINDINGS.md
+SPIKE_PROGRESS.md
+ralph_vpio.sh
+PROMPT_vpio.md
