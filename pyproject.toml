@@ -4,9 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "loguru>=0.7.3",
+    "moq-rs>=0.3.2,<0.4.0",
     "num2words>=0.5.14",
     "pipecat-ai-prebuilt>=1.0.5",
-    "pipecat-ai[kokoro,mlx-whisper,silero,webrtc,whisper]>=1.6.0",
+    "pipecat-ai[kokoro,mlx-whisper,moq,silero,webrtc,whisper]>=1.6.0",
     "pyaudio>=0.2.14",
     "python-dotenv>=1.2.2",
     "textual>=8.2.8",
