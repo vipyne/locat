@@ -146,6 +146,46 @@ def load_clip(path):
     return buf, fmt
 
 
+def resample_to(src_buf, dst_fmt):
+    """Resample/rechannel a PCM buffer to dst_fmt with pure-Python linear interp.
+
+    Needed so the clip can be played STRAIGHT into the output node (no mixer — the
+    main mixer is incompatible with VPIO), matching the output's format exactly.
+    Avoids AVAudioConverter's block-based API (unreliable via PyObjC — returns a
+    generic OSStatus -1). Linear interpolation is plenty for a speech reference
+    clip, and it reuses the channel_floats/fill_channel helpers proven by --selftest.
+    """
+    src_sr = float(src_buf.format().sampleRate())
+    dst_sr = float(dst_fmt.sampleRate())
+    dst_ch = int(dst_fmt.channelCount())
+
+    mono = channel_floats(src_buf, 0)
+    n_src = len(mono)
+    if n_src == 0:
+        raise RuntimeError("source clip is empty")
+
+    if src_sr == dst_sr:
+        out = list(mono)
+    else:
+        ratio = dst_sr / src_sr
+        n_dst = int(n_src * ratio)
+        out = [0.0] * n_dst
+        for i in range(n_dst):
+            x = i / ratio
+            j = int(x)
+            frac = x - j
+            a = mono[j]
+            b = mono[j + 1] if j + 1 < n_src else a
+            out[i] = a + (b - a) * frac
+
+    dst_buf = AVFoundation.AVAudioPCMBuffer.alloc().initWithPCMFormat_frameCapacity_(
+        dst_fmt, len(out))
+    dst_buf.setFrameLength_(len(out))
+    for ch in range(dst_ch):  # duplicate mono into every output channel
+        fill_channel(dst_buf, out, ch)
+    return dst_buf
+
+
 def run_capture(vp_enabled, seconds, baseline_secs):
     clip_buf, clip_fmt = load_clip(ensure_clip())
 
@@ -160,9 +200,16 @@ def run_capture(vp_enabled, seconds, baseline_secs):
     print(f"voice processing: input={bool(inp.isVoiceProcessingEnabled())} "
           f"output={bool(out.isVoiceProcessingEnabled())}")
 
+    # macOS VPIO is incompatible with mainMixerNode — touching it fails engine
+    # start with -10875 (kAudioUnitErr_FailedInitialization; bisected in
+    # probe_vpio_start.py). Connect the player STRAIGHT to the output node and
+    # resample the clip to the output's format (no mixer needed for SRC/channels).
+    # The played clip is the AEC reference the voice-processing unit cancels.
+    out_fmt = out.outputFormatForBus_(0)
+    play_buf = resample_to(clip_buf, out_fmt)
     player = AVFoundation.AVAudioPlayerNode.alloc().init()
     engine.attachNode_(player)
-    engine.connect_to_format_(player, engine.mainMixerNode(), clip_fmt)
+    engine.connect_to_format_(player, out, out_fmt)
     player.setVolume_(1.0)
 
     tap_fmt = inp.outputFormatForBus_(0)
@@ -185,18 +232,18 @@ def run_capture(vp_enabled, seconds, baseline_secs):
 
     # format=None -> use the node's own output format for the bus
     inp.installTapOnBus_bufferSize_format_block_(0, 4800, None, tap_block)
-
     engine.prepare()
     ok, err = engine.startAndReturnError_(None)
     if not ok:
-        raise RuntimeError(f"engine start failed: {err} "
-                           "(mic permission? mismatched input/output devices?)")
+        raise RuntimeError(
+            f"engine start failed: {err.localizedDescription() if err else err} "
+            f"(code {err.code() if err else '?'})")
     print(f"engine running; capturing {baseline_secs:.0f}s baseline (stay quiet)...")
     time.sleep(baseline_secs)
 
     play_start = time.monotonic()
     player.scheduleBuffer_atTime_options_completionHandler_(
-        clip_buf, None, BUFFER_LOOPS, None)
+        play_buf, None, BUFFER_LOOPS, None)
     player.play()
     print(f"playing clip (looped) for {seconds:.0f}s — do not speak...")
     time.sleep(seconds)
@@ -259,11 +306,14 @@ def main():
 
     try:
         run_capture(not args.no_vp, args.seconds, args.baseline)
-    finally:
-        # Known issue: HAL teardown can hang the interpreter at exit (see
-        # SPIKE_PROGRESS.md). Results are already printed; exit hard.
-        sys.stdout.flush()
-        os._exit(0)
+    except BaseException:  # noqa: BLE001 — surface it; os._exit would otherwise eat it
+        import traceback
+        traceback.print_exc()
+    # Known issue: HAL teardown can hang the interpreter at exit (see
+    # SPIKE_PROGRESS.md). Results (or the traceback above) are printed; exit hard.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":
