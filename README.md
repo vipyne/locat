@@ -1,65 +1,62 @@
 # locat — a local, fully-offline Pipecat voice bot
 
-> WIP but `bot.py`, `bot_web.py`, and `bot_moq.py` all work. Documentation could use some love.
+> WIP but isn't everything?
 
-
-A voice bot that runs **100% offline**. Speech-to-text, the language model, and
-text-to-speech are all local services, and the "transport†" is your machine's own
-audio hardware — the microphone and speakers. The success test is simple: turn off
-Wi-Fi, start the bot, and hold a spoken conversation.
-
-The v1 personality is a **private financial thinking partner**: something you can
-talk through money decisions with, out loud, knowing nothing you say leaves the
-computer. Because those details are personal, no cloud LLM is acceptable — the model
-is local by design.
+A voice bot that runs Key-Free & **100% offline**. Speech-to-text, the language model, 
+and text-to-speech are all local services, and the "transport†" is your machine's own
+audio hardware — the microphone and speakers.
 
 Built on the latest [Pipecat](https://github.com/pipecat-ai/pipecat) release
 (≥ 1.6). This repo is meant to double as a clear, reproducible **example** of how to
 wire up a fully-local Pipecat bot.
 
+The v1 personality is a **private financial thinking partner**: something you can
+talk through money decisions with, out loud, knowing nothing you say leaves the
+computer.
+
 †Audio is hard and there are a few ways to handle it in this scenario. See "how do you
 solve a problem like echo cancellation?"
-
-> **No API keys. Ever.** Every service is local and auth-free. `.env` holds *config
-> only* — model names, a voice, device indices, cache paths — never secrets. The
-> only time the bot touches the network is the one-time, anonymous model download in
-> [Step 2](#2-fetch-the-models-the-one-time-online-step). See
-> [No secrets, no keys](#no-secrets-no-keys).
-
----
-
-## What's inside
-
-| Component | Service | Notes |
-|---|---|---|
-| Speech-to-text | `WhisperSTTServiceMLX` | Apple-Silicon-optimized Whisper via MLX |
-| Language model | Qwen2.5-14B-Instruct via **Ollama** | Local, OpenAI-compatible endpoint; env-configurable |
-| Text-to-speech | `KokoroTTSService` | Natural local neural voice (kokoro-onnx) |
-| Turn-taking | Silero VAD + Local Smart Turn v3 | Barge-in / interruptions, fully local (bundled with Pipecat) |
-| Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O (requires headphones) |
-| Alternative transports | `SmallWebRTC` / `MoQ` | run in a browser → free echo cancellation via `getUserMedia` |
-
 
 ---
 
 ## Requirements
 
-- **Apple Silicon Mac.** Whisper-MLX uses Apple's MLX framework. Developed on an M4
-  Pro / 48 GB / macOS 15.7; ~15 GB free disk for the models.
-- **[uv](https://docs.astral.sh/uv/)** — the Python package manager used throughout.
-  Python **3.12** is pinned (`.python-version`); 3.14 is too new for the ML wheels.
+- **Apple Silicon Mac.** Whisper-MLX uses Apple's MLX framework.
+- ~15 GB free disk for the models
+- Python **3.12** is pinned as 3.14 is too new for the ML wheels.
+- **[uv](https://docs.astral.sh/uv/)** — Python package manager.
 - **[Ollama](https://ollama.com/)** — serves the local LLM.
-- **PortAudio** — PyAudio's native dependency.
+- **PortAudio** OR **any web browser** — PyAudio's native dependency / audio handling.
 
 ---
 
 ## Setup
 
+### 0. The [short short version](https://www.youtube.com/watch?v=5X4HYA-lB-U):
+
+> [!IMPORTANT]
+> Use headphones 🎧
+```bash
+git clone git@github.com:vipyne/locat.git && cd locat
+uv sync
+bash scripts/run_ollama.sh
+uv run python scripts/prefetch_models.py
+```
+Ctrl+C
+
+> [!IMPORTANT]
+> No really, use headphones 🎧
+```bash
+start.sh
+```
+
+Or...
+
 ### 1. Clone, install system deps, and sync the environment
 
 ```bash
-git clone <this-repo-url> locat && cd locat
-brew install portaudio        # PyAudio needs this
+git clone git@github.com:vipyne/locat.git && cd locat
+brew install portaudio        # PyAudio needs this; Not necessary if using browser
 uv sync                       # creates .venv and installs everything (Python 3.12)
 ```
 
@@ -136,16 +133,16 @@ reaches out to the network after the warm-up.
 
 ## How do you solve a problem like echo cancellation
 
-### Use headphones aka Local local [sic] audio
+### Use headphones
 
 Because reasons, it's much closer to impossible than just impractical to get native 
-macOS AEC (Acoustic Echo Cancellation) to work with pyaudio. So use headphones and 
+macOS AEC (Acoustic Echo Cancellation) to work with pyaudio. Use headphones and 
 the bot won't keep interrupting itself.
 
 ### Use the web browser's `getUserMedia`
 
 Another fantastic workaround is to use a browser. Not the internet, just the web 
-browser. Do this and :tada:, you have echo cancellation.
+browser. Do this and 🎉, you have echo cancellation.
 
 Two browser bots ship here — same offline brain, different transport. Each start
 script brings up Ollama and serves a local page (still fully offline — the browser
@@ -153,7 +150,7 @@ talks to the bot over loopback, no internet):
 
 ```bash
 ./start_web.sh    # WebRTC   → open http://localhost:7860/client
-./start_moq.sh    # MoQ/QUIC → open http://localhost:7860, pick "Media over QUIC" (lower latency)
+./start_moq.sh    # MoQ/QUIC → open http://localhost:7860, pick "Media over QUIC"
 ```
 
 ---
@@ -170,6 +167,19 @@ There are **no API keys** anywhere in this project, and there's nowhere to put o
 `.env` is **config only** — model names, a voice, device indices, cache paths. It is
 gitignored, but nothing secret ever belongs in it. The single network event in the
 bot's entire lifecycle is the one-time, anonymous model download in step 2.
+
+---
+
+## What's inside
+
+| Component | Service | Notes |
+|---|---|---|
+| Speech-to-text | `WhisperSTTServiceMLX` | Apple-Silicon-optimized Whisper via MLX |
+| Language model | Qwen2.5-14B-Instruct via **Ollama** | Local, OpenAI-compatible endpoint; env-configurable |
+| Text-to-speech | `KokoroTTSService` | Natural local neural voice (kokoro-onnx) |
+| Turn-taking | Silero VAD + Local Smart Turn v3 | Barge-in / interruptions, fully local (bundled with Pipecat) |
+| Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O (requires headphones) |
+| Alternative transports | `SmallWebRTC` / `MoQ` | run in a browser → free echo cancellation via `getUserMedia` |
 
 ---
 
@@ -227,10 +237,11 @@ locat/
 │   ├── check_audio.py        # diagnostic: raw mic input level meter
 │   └── check_vad.py          # diagnostic: Silero VAD confidence/volume vs thresholds
 │
-├── ralph.sh                  # the "ralph loop" that built this repo (autonomous runner)
-├── PROMPT.md                 # per-iteration instructions for the loop
-├── RALPH.md                  # operator runbook for the loop
-├── PLAN.md                   # the approved build plan the loop followed
+├── ralph/                    # the "ralph loop" that built this repo
+│   ├── ralph.sh              #   autonomous agent runner
+│   ├── PROMPT.md             #   per-iteration instructions for the loop
+│   ├── RALPH.md              #   operator runbook for the loop
+│   └── PLAN.md               #   the approved build plan the loop followed
 │
 ├── .env.example              # documented config knobs (copy to .env)
 ├── .python-version           # 3.12
@@ -250,10 +261,11 @@ locat/
 v1 is conversation only; the repo is structured so later capabilities layer in
 cleanly, each its own build cycle:
 
-1. **Persistent memory** across sessions (local JSON/SQLite).
-2. **Document RAG** over your own financial files (local embeddings + vector store).
-3. **Function-calling tools** (compound interest, amortization, savings-goal
+0. create a fun custom frontend for the browser versions.
+1. **Document RAG** over your own financial files (local embeddings + vector store).
+2. **Function-calling tools** (compound interest, amortization, savings-goal
    calculators).
+3. **Persistent memory** across sessions (local JSON/SQLite).
 
 ---
 
@@ -262,8 +274,9 @@ cleanly, each its own build cycle:
 The bot is a private *thinking partner*, not a licensed financial advisor. It has no
 access to your real accounts and won't invent your numbers. For big, irreversible,
 or high-stakes decisions, confirm with a qualified professional.
-Ha, claude wrote that^ when I said I wanted to create a fully offline bot that I could 
-talk to about my personal finances.
+Ha, claude wrote this^ when I said I wanted to create a fully offline bot that I could 
+talk to about my personal finances. But yes, _always_ consult a human after consulting
+a bot.
 
 ## Emojis
 claude did _not_ add enough/any emojis so: 

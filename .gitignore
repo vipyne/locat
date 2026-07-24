@@ -13,9 +13,10 @@ __pycache__/
 
 # Runtime + debug logs
 *.log
-.ralph/
+ralph/logs/
 
-# Ralph-loop / spike run-state sentinels (created at runtime)
+# Ralph-loop / spike run-state sentinels (created at runtime under ralph/;
+# these patterns are unanchored so they match at any depth)
 RALPH_DONE
 RALPH_BLOCKED
 RALPH_BLOCKED.md
