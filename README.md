@@ -1,7 +1,10 @@
-# locat — a fully-offline Pipecat voice bot
+# locat — a local, fully-offline Pipecat voice bot
+
+> WIP but `bot.py`, `bot_web.py`, and `bot_moq.py` all work. Documentation could use some love.
+
 
 A voice bot that runs **100% offline**. Speech-to-text, the language model, and
-text-to-speech are all local services, and the "transport" is your machine's own
+text-to-speech are all local services, and the "transport†" is your machine's own
 audio hardware — the microphone and speakers. The success test is simple: turn off
 Wi-Fi, start the bot, and hold a spoken conversation.
 
@@ -11,8 +14,11 @@ computer. Because those details are personal, no cloud LLM is acceptable — the
 is local by design.
 
 Built on the latest [Pipecat](https://github.com/pipecat-ai/pipecat) release
-(≥ 1.5). This repo is meant to double as a clear, reproducible **example** of how to
+(≥ 1.6). This repo is meant to double as a clear, reproducible **example** of how to
 wire up a fully-local Pipecat bot.
+
+†Audio is hard and there are a few ways to handle it in this scenario. See "how do you
+solve a problem like echo cancellation?"
 
 > **No API keys. Ever.** Every service is local and auth-free. `.env` holds *config
 > only* — model names, a voice, device indices, cache paths — never secrets. The
@@ -30,17 +36,9 @@ wire up a fully-local Pipecat bot.
 | Language model | Qwen2.5-14B-Instruct via **Ollama** | Local, OpenAI-compatible endpoint; env-configurable |
 | Text-to-speech | `KokoroTTSService` | Natural local neural voice (kokoro-onnx) |
 | Turn-taking | Silero VAD + Local Smart Turn v3 | Barge-in / interruptions, fully local (bundled with Pipecat) |
-| Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O |
+| Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O (requires headphones) |
+| Alternative transports | `SmallWebRTC` / `MoQ` | run in a browser → free echo cancellation via `getUserMedia` |
 
-Pipeline (full duplex):
-
-```
-transport.input() → STT → user-context → LLM → TTS → transport.output() → assistant-context
-```
-
-**Scope of v1: conversation only.** No persistent memory, no document RAG, no
-function-calling tools — those are deferred (see [Roadmap](#roadmap)). v1 is the
-smallest thing that fully works end-to-end offline.
 
 ---
 
@@ -117,12 +115,18 @@ uv run bot.py
 The bot speaks a short greeting, then listens. Talk to it; it replies through your
 speakers. Talk over it and it yields (barge-in). Press **Ctrl-C** to stop.
 
-### 4. Run offline (the whole point)
+**One-command launch:** `./start.sh` brings up the repo-local Ollama server (if it
+isn't already running) and then starts the bot — so you can skip the manual
+`run_ollama.sh` in step 2a. For the browser bots (speakers, *with* echo
+cancellation), use `./start_web.sh` or `./start_moq.sh` — see
+[echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation).
+
+### 4. Run offline
 
 Once the models are fetched:
 
 1. Make sure the local Ollama server is running (`bash scripts/run_ollama.sh`).
-2. **Turn off Wi-Fi / enable Airplane Mode.**
+2. **Turn off Wi-Fi / enable Airplane Mode.** (It won't use the internet if you don't turn off the internet. This is just showing off.)
 3. `uv run bot.py` and hold a conversation.
 
 With `LOG_LEVEL=DEBUG` (the default) you can watch the logs and confirm no service
@@ -130,15 +134,42 @@ reaches out to the network after the warm-up.
 
 ---
 
-## Picking a microphone / speaker
+## How do you solve a problem like echo cancellation
 
-By default the bot uses your system default input and output devices. To target a
-specific device, set `INPUT_DEVICE_INDEX` / `OUTPUT_DEVICE_INDEX` in `.env` to a
-PyAudio device index. List the indices with:
+### Use headphones aka Local local [sic] audio
+
+Because reasons, it's much closer to impossible than just impractical to get native 
+macOS AEC (Acoustic Echo Cancellation) to work with pyaudio. So use headphones and 
+the bot won't keep interrupting itself.
+
+### Use the web browser's `getUserMedia`
+
+Another fantastic workaround is to use a browser. Not the internet, just the web 
+browser. Do this and :tada:, you have echo cancellation.
+
+Two browser bots ship here — same offline brain, different transport. Each start
+script brings up Ollama and serves a local page (still fully offline — the browser
+talks to the bot over loopback, no internet):
 
 ```bash
-uv run python -c "import pyaudio; p=pyaudio.PyAudio(); [print(i, p.get_device_info_by_index(i)['name']) for i in range(p.get_device_count())]"
+./start_web.sh    # WebRTC   → open http://localhost:7860/client
+./start_moq.sh    # MoQ/QUIC → open http://localhost:7860, pick "Media over QUIC" (lower latency)
 ```
+
+---
+
+## No secrets, no keys
+
+There are **no API keys** anywhere in this project, and there's nowhere to put one:
+
+- **Ollama** pulls the LLM from its own public registry and serves it locally.
+- **Whisper-MLX, Kokoro, Silero VAD, Smart Turn v3** download anonymously from
+  Hugging Face (none are gated) — or, for Silero/Smart Turn, ship bundled with
+  Pipecat.
+
+`.env` is **config only** — model names, a voice, device indices, cache paths. It is
+gitignored, but nothing secret ever belongs in it. The single network event in the
+bot's entire lifecycle is the one-time, anonymous model download in step 2.
 
 ---
 
@@ -170,39 +201,46 @@ changes the voice you hear.
 
 ---
 
-## No secrets, no keys
-
-There are **no API keys** anywhere in this project, and there's nowhere to put one:
-
-- **Ollama** pulls the LLM from its own public registry and serves it locally.
-- **Whisper-MLX, Kokoro, Silero VAD, Smart Turn v3** download anonymously from
-  Hugging Face (none are gated) — or, for Silero/Smart Turn, ship bundled with
-  Pipecat.
-
-`.env` is **config only** — model names, a voice, device indices, cache paths. It is
-gitignored, but nothing secret ever belongs in it. The single network event in the
-bot's entire lifecycle is the one-time, anonymous model download in step 2.
-
----
-
 ## Repository layout
+
+All three bots share one offline brain (the same STT → VAD → LLM → TTS pipeline and
+builders); they differ only in the transport.
 
 ```
 locat/
-├── .python-version           # 3.12
-├── pyproject.toml            # uv project + pinned deps
-├── .env.example              # documented config knobs (copy to .env)
-├── bot.py                    # the pipeline — `uv run bot.py`
+├── bot.py                    # CLI / headphones — LocalAudioTransport
+├── bot_web.py                # browser / speakers — SmallWebRTC (free echo cancellation)
+├── bot_moq.py                # browser / speakers — MoQ over QUIC (lower latency)
 ├── config.py                 # env-driven settings, zero-config defaults
+├── spoken_text_filter.py     # TTS filter: "$3,000" → "three thousand dollars"
 ├── prompts/
 │   └── financial_advisor.py  # the v1 system prompt
+│
+├── start.sh                  # one command: bring up Ollama + run bot.py (CLI)
+├── start_web.sh              # one command: bring up Ollama + run bot_web.py (WebRTC)
+├── start_moq.sh              # one command: bring up Ollama + run bot_moq.py (MoQ)
+├── stop.sh                   # stop the background Ollama server
+│
 ├── scripts/
 │   ├── run_ollama.sh         # relocate Ollama store + serve + pull the LLM
-│   └── prefetch_models.py    # one-time online warm-up (Whisper + Kokoro)
-└── models/                   # ALL checkpoints live here (gitignored)
+│   ├── prefetch_models.py    # one-time online warm-up (Whisper + Kokoro)
+│   ├── check_audio.py        # diagnostic: raw mic input level meter
+│   └── check_vad.py          # diagnostic: Silero VAD confidence/volume vs thresholds
+│
+├── ralph.sh                  # the "ralph loop" that built this repo (autonomous runner)
+├── PROMPT.md                 # per-iteration instructions for the loop
+├── RALPH.md                  # operator runbook for the loop
+├── PLAN.md                   # the approved build plan the loop followed
+│
+├── .env.example              # documented config knobs (copy to .env)
+├── .python-version           # 3.12
+├── pyproject.toml            # uv project + pinned deps
+├── uv.lock                   # locked dependency versions
+│
+└── models/                   # ALL checkpoints live here (gitignored; created by setup)
     ├── huggingface/          # Whisper-MLX
     ├── kokoro/               # Kokoro onnx + voices
-    └── ollama/               # Ollama store
+    └── ollama/               # Ollama LLM store
 ```
 
 ---
@@ -224,3 +262,9 @@ cleanly, each its own build cycle:
 The bot is a private *thinking partner*, not a licensed financial advisor. It has no
 access to your real accounts and won't invent your numbers. For big, irreversible,
 or high-stakes decisions, confirm with a qualified professional.
+Ha, claude wrote that^ when I said I wanted to create a fully offline bot that I could 
+talk to about my personal finances.
+
+## Emojis
+claude did _not_ add enough/any emojis so: 
+🎉🎊🥳🎈🎁🎀🌟✨💫⭐🌈🔥💥⚡☀️🌙🌛🌜🌞🪐🌍🌎🌏🌊🏔️⛰️🌋🗻🏕️🏖️🏜️🏝️🌅🌄🌇🌆🏙️🌃🌌🎆🎇🌠🌉🍀🌿🍃🌾🌵🌴🌳🌲🎄🌰🍄🌻🌺🌸🌼🌷🌹🥀💐🏵️🌊🐠🐟🐬🐳🐋🦈🐙🦑🦐🦞🦀🐚🐌🦋🐛🐝🐞🦗🕷️🦂🐢🐍🦎🦖🦕🐙🦭🦦🦥🐾🐕🐈🐇🐿️ 🦫🦃🐔🐓🐣🐤🐥🦆🦢🦅🦉🦚🦜🕊️🐧🐦🦩🦨🐘🦏🦛🐪🐫🦒🦓🐂🐃🐄🐎🐖🐏🐑🦙🐐🦌🐕‍🦺🐈‍⬛🦮🐩🐾🍎🍏🍐🍊🍋🍌🫐🍈🍒🍑🥭🍍🥥🥝🍅🍆🥑🥦🥬🥒🌶️ 🫑🌽🥕🫒🧄🧅🥔🍠🥐🥯🍞🥖🥨🧀🥚🍳🧈🥞🧇🥓🥩🍗🍖🌭🍔🍟🍕🫓🥪🥙🧆🌮🌯🫔🥗🥘🫕🥫🍝🍜🍲🍛🍣🍱🥟🦪🍤🍙🍚🍘🍥🥠🥮🍢🍡🍧🍨🍦🥧🧁🍰🎂🍮🍭🍬🍫🍿🍩🍪🌰🥜🍯🥛🍼☕🫖🍵🧃🥤🧋🍶🍺🍻🥂🍷🥃🍸🍹🧉🍾🧊🥄🍴🍽️🥣🥡🥢🧂⚽🏀🏈⚾🥎🎾🏐🏉🥏🎱🪀🏓🏸🏒🏑🥍🏏🪃🥅⛳🪁🏹🎣🤿🥊🥋🎽🛹🛼🛷⛸️ 🥌🎿⛷️ 🏂🪂🏋️ 🤼🤸⛹️ 🤺🤾🏌️ 🏇🧘🏄🏊🤽🚣🧗🚵🚴🏆🥇🥈🥉🏅🎖️ 🏵️ 🎗️ 🎫🎟️ 🎪🤹🎭🩰🎨🎬🎤🎧🎼🎹🥁🎷🎺🎸🪕🎻🎲♟️🎯🎳🎮🎰🧩
