@@ -34,6 +34,26 @@ else
   model_ready || { echo "start: ${LLM_MODEL} not ready — see $OLLAMA_LOG" >&2; exit 1; }
 fi
 
-echo "start: Ollama ready. Launching bot (LLM_MODEL=${LLM_MODEL}). Ctrl-C to stop the bot;"
-echo "       Ollama keeps running in the background — run ./stop.sh to shut it down."
-exec env LLM_MODEL="${LLM_MODEL}" uv run bot.py
+echo "start: Ollama ready. Launching bot (LLM_MODEL=${LLM_MODEL})."
+echo "       Ctrl-C stops the bot; Ollama keeps running — run ./stop.sh to shut it down."
+
+# Run the bot in its OWN process group (set -m) so Ctrl-C is handled here in the
+# launcher, not swallowed by the bot. We then tear down the whole bot tree
+# (uv + python + audio threads): a plain `exec`/foreground bot can hang on audio
+# teardown and leave Ctrl-C looking dead.
+set -m
+env LLM_MODEL="${LLM_MODEL}" uv run bot.py &
+BOT_PID=$!
+
+stop_bot() {
+  trap - INT TERM
+  set +e
+  echo
+  echo "start: stopping bot…"
+  kill -INT -"$BOT_PID" 2>/dev/null || kill -INT "$BOT_PID" 2>/dev/null   # try graceful
+  for _ in $(seq 1 8); do kill -0 "$BOT_PID" 2>/dev/null || break; sleep 0.25; done
+  kill -KILL -"$BOT_PID" 2>/dev/null || kill -KILL "$BOT_PID" 2>/dev/null  # then force
+  exit 0
+}
+trap stop_bot INT TERM
+wait "$BOT_PID"

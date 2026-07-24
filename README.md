@@ -30,27 +30,49 @@ solve a problem like echo cancellation?"
 
 ---
 
-## Setup
+## Quickstart Setup
 
 ### 0. The [short short version](https://www.youtube.com/watch?v=5X4HYA-lB-U):
 
-> [!IMPORTANT]
-> Use headphones 🎧
+> [!NOTE]
+> The first pull will take a few minutes to download the models.
+
+#### Browser-based (for echo cancellation):
 ```bash
 git clone git@github.com:vipyne/locat.git && cd locat
 uv sync
 bash scripts/run_ollama.sh
 uv run python scripts/prefetch_models.py
 ```
-Ctrl+C
+Ctrl+C; then turn off wi-fi if you want to show off and then:
 
-> [!IMPORTANT]
-> No really, use headphones 🎧
 ```bash
-start.sh
+./start_web.sh
 ```
+Open http://localhost:7860, click `connect` & have a conversation.
 
 Or...
+
+#### PyAudio & headphones (for echo cancellation):
+
+> [!IMPORTANT]
+> Use headphones 🎧
+
+```bash
+git clone git@github.com:vipyne/locat.git && cd locat
+brew install portaudio
+uv sync
+bash scripts/run_ollama.sh
+uv run python scripts/prefetch_models.py
+```
+Ctrl+C; then turn off wi-fi if you want to show off and then:
+
+```bash
+./start.sh
+```
+Have a conversation.
+
+## Setup
 
 ### 1. Clone, install system deps, and sync the environment
 
@@ -102,6 +124,9 @@ after it finishes the bot can run with Wi-Fi off.
 Approximate total download: **~11 GB** (9 GB LLM + 1.5 GB Whisper + 0.35 GB Kokoro).
 
 ### 3. Run
+
+> [!IMPORTANT]
+> Use headphones 🎧
 
 With the Ollama server from step 2a running:
 
