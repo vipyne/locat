@@ -82,12 +82,12 @@ if (( VERBOSE )); then
   echo "doctor: capability matrix"
 
   GPU_CORES="$(system_profiler SPDisplaysDataType 2>/dev/null \
-    | awk -F': ' '/Total Number of Cores/{print $2; exit}')"
+    | awk -F': ' '/Total Number of Cores/{print $2; exit}' || :)"
   echo "  GPU cores:  ${GPU_CORES:-unknown}"
   echo "  free disk:  $(df -h . | awk 'NR==2{print $4}') available on this volume"
   if [[ -d models ]]; then
     echo "  ./models:"
-    du -sh models/*/ 2>/dev/null | awk '{printf "     %-8s %s\n", $1, $2}'
+    du -sh models/*/ 2>/dev/null | awk '{printf "     %-8s %s\n", $1, $2}' || :
   fi
 
   echo "  tooling:"
