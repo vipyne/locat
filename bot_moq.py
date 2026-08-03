@@ -7,7 +7,7 @@ MoQ relay in serve mode; the runner auto-generates a localhost TLS cert, so it s
 offline (loopback QUIC — no internet).
 
 Run:
-    ./start_moq.sh
+    ./start.sh
     # open http://localhost:7860, choose "Media over QUIC" in the dropdown, allow the mic, Connect.
 
 Reuses bot.py's exact pipeline/builders (VADProcessor + Whisper/Ollama/Kokoro + SpokenTextFilter);
