@@ -23,7 +23,7 @@ usage() { grep '^#   ' "$0" | sed 's/^#   //'; }
 TRANSPORT="moq"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -t|--transport) TRANSPORT="${2:-}"; shift 2 ;;
+    -t|--transport) TRANSPORT="${2:-}"; shift 2 || shift ;;
     -h|--help)      usage; exit 0 ;;
     *) echo "start: unknown option '$1' (try ./start.sh -h)" >&2; exit 1 ;;
   esac
