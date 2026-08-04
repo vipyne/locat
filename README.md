@@ -47,9 +47,9 @@ uv run python scripts/prefetch_models.py
 Ctrl+C; then turn off wi-fi if you want to show off and then:
 
 ```bash
-./start_web.sh
+./start.sh
 ```
-Open http://localhost:7860, click `connect` & have a conversation.
+Open http://localhost:7860, choose "Media over QUIC", click Connect & have a conversation. (Prefer WebRTC? ./start.sh -t webrtc → http://localhost:7860/client.)
 
 Or...
 
@@ -68,7 +68,7 @@ uv run python scripts/prefetch_models.py
 Ctrl+C; then turn off wi-fi if you want to show off and then:
 
 ```bash
-./start.sh
+./start.sh -t headphones
 ```
 Have a conversation.
 
@@ -138,10 +138,12 @@ The bot speaks a short greeting, then listens. Talk to it; it replies through yo
 speakers. Talk over it and it yields (barge-in). Press **Ctrl-C** to stop.
 
 **One-command launch:** `./start.sh` brings up the repo-local Ollama server (if it
-isn't already running) and then starts the bot — so you can skip the manual
-`run_ollama.sh` in step 2a. For the browser bots (speakers, *with* echo
-cancellation), use `./start_web.sh` or `./start_moq.sh` — see
-[echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation).
+isn't already running), prints the exact STT/LLM/TTS models in play, and serves the
+MoQ browser bot — so you can skip the manual `run_ollama.sh` in step 2a. Pick a
+different transport with `-t`: `./start.sh -t webrtc` (browser, SmallWebRTC) or
+`./start.sh -t headphones` (local audio hardware) — see
+[echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation). Not sure
+what your machine can handle? `./doctor.sh` (add `-v` for the full report).
 
 ### 4. Run offline
 
@@ -169,13 +171,13 @@ the bot won't keep interrupting itself.
 Another fantastic workaround is to use a browser. Not the internet, just the web 
 browser. Do this and 🎉, you have echo cancellation.
 
-Two browser bots ship here — same offline brain, different transport. Each start
-script brings up Ollama and serves a local page (still fully offline — the browser
-talks to the bot over loopback, no internet):
+Two browser transports ship here — same offline brain, different transport. `start.sh`
+brings up Ollama and serves a local page (still fully offline — the browser talks to
+the bot over loopback, no internet):
 
 ```bash
-./start_web.sh    # WebRTC   → open http://localhost:7860/client
-./start_moq.sh    # MoQ/QUIC → open http://localhost:7860, pick "Media over QUIC"
+./start.sh              # MoQ/QUIC → open http://localhost:7860, pick "Media over QUIC"
+./start.sh -t webrtc    # WebRTC   → open http://localhost:7860/client
 ```
 
 ---
@@ -251,9 +253,8 @@ locat/
 ├── prompts/
 │   └── financial_advisor.py  # the v1 system prompt
 │
-├── start.sh                  # one command: bring up Ollama + run bot.py (CLI)
-├── start_web.sh              # one command: bring up Ollama + run bot_web.py (WebRTC)
-├── start_moq.sh              # one command: bring up Ollama + run bot_moq.py (MoQ)
+├── start.sh                  # one command: bring up Ollama + run the bot (-t moq|webrtc|headphones)
+├── doctor.sh                 # what can this machine handle? (-v for full report)
 ├── stop.sh                   # stop the background Ollama server
 │
 ├── scripts/
