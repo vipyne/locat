@@ -27,9 +27,11 @@ def main() -> None:
         # pipecat missing (deps not synced) or WHISPER_MODEL not a valid
         # enum member — still print the configured name rather than dying.
         whisper_repo = ""
+    print(f"")
     print(f"models:  STT  {whisper_name}{whisper_repo}")
     print(f"         LLM  {config.llm_model()} (Ollama @ {config.ollama_base_url()})")
     print(f"         TTS  Kokoro {Path(config.kokoro_model_path()).name} · voice {config.kokoro_voice()}")
+    print(f"")
 
 
 if __name__ == "__main__":

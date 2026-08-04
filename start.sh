@@ -7,8 +7,8 @@
 # subsequent starts are instant; stop it with ./stop.sh.
 #
 # Usage:
-#   ./start.sh                     # MoQ transport (default) — browser, lowest latency
-#   ./start.sh -t webrtc           # SmallWebRTC transport — browser
+#   ./start.sh                     # SmallWebRTC transport (default) — browser
+#   ./start.sh -t moq              # MoQ transport — browser, lowest latency
 #   ./start.sh -t headphones       # local audio hardware (use headphones! 🎧)
 #   ./start.sh -h                  # show this help
 #   LLM_MODEL=llama3 ./start.sh    # use a different local model
@@ -20,7 +20,7 @@ cd "$REPO"
 
 usage() { grep '^#   ' "$0" | sed 's/^#   //'; }
 
-TRANSPORT="moq"
+TRANSPORT="webrtc"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--transport) TRANSPORT="${2:-}"; shift 2 || shift ;;
@@ -31,7 +31,7 @@ done
 
 case "$TRANSPORT" in
   moq|webrtc|headphones) ;;
-  *) echo "start: unknown transport '$TRANSPORT' — valid: moq (default), webrtc, headphones" >&2; exit 1 ;;
+  *) echo "start: unknown transport '$TRANSPORT' — valid: webrtc (default), moq, headphones" >&2; exit 1 ;;
 esac
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
@@ -60,21 +60,24 @@ uv run python scripts/print_models.py \
 case "$TRANSPORT" in
   moq)
     CMD=(uv run python bot_moq.py --host localhost --port "${WEB_PORT}")
-    echo "start: Ollama ready. Serving the MoQ bot on http://localhost:${WEB_PORT}"
+    echo "start: Ollama ready."
     echo "       ▶ Open  http://localhost:${WEB_PORT}  — choose 'Media over QUIC' in the"
     echo "         top-left dropdown, allow the mic, and Connect."
     ;;
   webrtc)
     CMD=(uv run python bot_web.py --host localhost --port "${WEB_PORT}")
-    echo "start: Ollama ready. Serving the WebRTC bot on http://localhost:${WEB_PORT}"
-    echo "       ▶ Open  http://localhost:${WEB_PORT}/client  in a browser, allow the mic, and talk."
+    echo "start: Ollama ready."
     ;;
   headphones)
     CMD=(uv run bot.py)
     echo "start: Ollama ready. Launching the local-audio bot — use headphones 🎧"
     ;;
 esac
-echo "       Ctrl-C stops the bot; Ollama keeps running — run ./stop.sh to shut it down."
+echo ""
+echo ""
+echo " → → → Ctrl-C stops the bot; Ollama keeps running — run ./stop.sh to shut it down."
+echo ""
+echo ""
 
 # Run the bot in its OWN process group (set -m) so Ctrl-C is handled here in the
 # launcher, not swallowed by the bot. We then tear down the whole bot tree
