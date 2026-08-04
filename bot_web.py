@@ -9,7 +9,7 @@ We keep everything else identical and just swap the transport to Pipecat's serve
 loopback host candidates, so it still runs **fully offline / airplane mode**.
 
 Run it:
-    ./start_web.sh                 # brings up Ollama + serves the bot
+    ./start.sh -t webrtc           # brings up Ollama + serves the bot
     # then open  http://localhost:7860/client  in a browser, allow the mic, and talk.
 
 Everything is reused from bot.py (STT/LLM/TTS/VAD/context/preflight); the ONLY change is
