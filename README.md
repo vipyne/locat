@@ -143,7 +143,9 @@ MoQ browser bot — so you can skip the manual `run_ollama.sh` in step 2a. Pick 
 different transport with `-t`: `./start.sh -t webrtc` (browser, SmallWebRTC) or
 `./start.sh -t headphones` (local audio hardware) — see
 [echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation). Not sure
-what your machine can handle? `./doctor.sh` (add `-v` for the full report).
+what your machine can handle? `./doctor.sh` (add `-v` for the full hardware profile
+and a model catalog ranked by fit, or `-i` to interactively pick an STT/LLM/TTS
+combo the script sanity-checks against your hardware).
 
 ### 4. Run offline
 
@@ -254,7 +256,7 @@ locat/
 │   └── financial_advisor.py  # the v1 system prompt
 │
 ├── start.sh                  # one command: bring up Ollama + run the bot (-t moq|webrtc|headphones)
-├── doctor.sh                 # what can this machine handle? (-v for full report)
+├── doctor.sh                 # what can this machine handle? (-v full report, -i model picker)
 ├── stop.sh                   # stop the background Ollama server
 │
 ├── scripts/
