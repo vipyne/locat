@@ -7,7 +7,7 @@ and text-to-speech are all local services, and the "transport†" is your machin
 audio hardware — the microphone and speakers.
 
 Built on the latest [Pipecat](https://github.com/pipecat-ai/pipecat) release
-(≥ 1.6). This repo is meant to double as a clear, reproducible **example** of how to
+(≥ 1.7). This repo is meant to double as a clear, reproducible **example** of how to
 wire up a fully-local Pipecat bot.
 
 The v1 personality is a **private financial thinking partner**: something you can
@@ -86,7 +86,7 @@ Optionally copy the config template (everything is optional — the bot runs wit
 empty or absent `.env`):
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 ### 2. Fetch the models (the one-time online step)
@@ -143,7 +143,10 @@ MoQ browser bot — so you can skip the manual `run_ollama.sh` in step 2a. Pick 
 different transport with `-t`: `./start.sh -t webrtc` (browser, SmallWebRTC) or
 `./start.sh -t headphones` (local audio hardware) — see
 [echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation). Not sure
-what your machine can handle? `./doctor.sh` (add `-v` for the full report).
+what your machine can handle? `./doctor.sh` prints recommended STT/LLM/TTS cascades
+sized to your hardware (add `-v` for the full hardware profile and per-slot model
+catalogs ranked by fit, or `-i` to interactively pick a combo the script
+sanity-checks against your hardware).
 
 ### 4. Run offline
 
@@ -201,9 +204,9 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 
 | Component | Service | Notes |
 |---|---|---|
-| Speech-to-text | `WhisperSTTServiceMLX` | Apple-Silicon-optimized Whisper via MLX |
+| Speech-to-text | `WhisperSTTServiceMLX` *(default)* | Apple-Silicon-optimized Whisper via MLX. Alternatives via `STT_ENGINE`: `faster_whisper` (CPU), `moonshine` (tiny CPU ONNX) |
 | Language model | Qwen2.5-14B-Instruct via **Ollama** | Local, OpenAI-compatible endpoint; env-configurable |
-| Text-to-speech | `KokoroTTSService` | Natural local neural voice (kokoro-onnx) |
+| Text-to-speech | `KokoroTTSService` *(default)* | Natural local neural voice (kokoro-onnx). Alternative via `TTS_ENGINE`: `piper` |
 | Turn-taking | Silero VAD + Local Smart Turn v3 | Barge-in / interruptions, fully local (bundled with Pipecat) |
 | Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O (requires headphones) |
 | Alternative transports | `SmallWebRTC` / `MoQ` | run in a browser → free echo cancellation via `getUserMedia` |
@@ -213,15 +216,20 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 ## Configuration
 
 Every knob is an environment variable (read from `.env` if present). All are
-optional — the shown value is the default. See [`.env.example`](.env.example) for
+optional — the shown value is the default. See [`env.example`](env.example) for
 the copy-paste template.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `LLM_MODEL` | `qwen2.5:14b` | Ollama model tag. Same string `run_ollama.sh` pulls and the bot serves. Smaller/faster: `qwen2.5:7b`. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible Ollama endpoint (note the trailing `/v1`). |
+| `STT_ENGINE` | `whisper_mlx` | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). |
 | `WHISPER_MODEL` | `LARGE_V3_TURBO` | `MLXModel` member: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`. Must match what you prefetched. |
+| `FASTER_WHISPER_MODEL` | `DISTIL_MEDIUM_EN` | faster-whisper model (when `STT_ENGINE=faster_whisper`); downloads on first use. |
+| `MOONSHINE_MODEL` | `SMALL_STREAMING` | Moonshine model (when `STT_ENGINE=moonshine`); downloads on first use. |
+| `TTS_ENGINE` | `kokoro` | TTS engine `services.py` builds: `kokoro` or `piper` (`uv sync --extra piper`; piper-tts is GPL-3.0). |
 | `KOKORO_VOICE` | `af_heart` | Kokoro voice id (e.g. `af_bella`, `am_michael`, `bf_emma`). |
+| `PIPER_VOICE` | `en_US-lessac-medium` | Piper voice id (when `TTS_ENGINE=piper`); downloads (~60 MB) on first use into `./models/piper`. |
 | `INPUT_DEVICE_INDEX` | *(system default)* | PyAudio mic index. |
 | `OUTPUT_DEVICE_INDEX` | *(system default)* | PyAudio speaker index. |
 | `GREETING` | *"Hi. I'm your private, offline financial thinking partner…"* | Opening line spoken on startup. |
@@ -240,21 +248,24 @@ changes the voice you hear.
 
 ## Repository layout
 
-All three bots share one offline brain (the same STT → VAD → LLM → TTS pipeline and
-builders); they differ only in the transport.
+All three bots share one offline brain (the same STT → VAD → LLM → TTS pipeline);
+they differ only in the transport. The STT/LLM/TTS services themselves are built in
+`services.py`, dispatched on `STT_ENGINE` / `TTS_ENGINE` — so swapping engines (via
+`.env` or `./doctor.sh -i`) never touches a bot file you may have customized.
 
 ```
 locat/
 ├── bot.py                    # CLI / headphones — LocalAudioTransport
 ├── bot_web.py                # browser / speakers — SmallWebRTC (free echo cancellation)
 ├── bot_moq.py                # browser / speakers — MoQ over QUIC (lower latency)
+├── services.py               # STT/LLM/TTS builders, engine-dispatched (STT_ENGINE / TTS_ENGINE)
 ├── config.py                 # env-driven settings, zero-config defaults
 ├── spoken_text_filter.py     # TTS filter: "$3,000" → "three thousand dollars"
 ├── prompts/
 │   └── financial_advisor.py  # the v1 system prompt
 │
 ├── start.sh                  # one command: bring up Ollama + run the bot (-t moq|webrtc|headphones)
-├── doctor.sh                 # what can this machine handle? (-v for full report)
+├── doctor.sh                 # what can this machine handle? (-v full report, -i model picker)
 ├── stop.sh                   # stop the background Ollama server
 │
 ├── scripts/
@@ -269,14 +280,16 @@ locat/
 │   ├── RALPH.md              #   operator runbook for the loop
 │   └── PLAN.md               #   the approved build plan the loop followed
 │
-├── .env.example              # documented config knobs (copy to .env)
+├── MODELS_TO_ADD.md          # engines considered but not (yet) wired — and why
+├── env.example              # documented config knobs (copy to .env)
 ├── .python-version           # 3.12
 ├── pyproject.toml            # uv project + pinned deps
 ├── uv.lock                   # locked dependency versions
 │
 └── models/                   # ALL checkpoints live here (gitignored; created by setup)
-    ├── huggingface/          # Whisper-MLX
+    ├── huggingface/          # Whisper-MLX + faster-whisper (HF cache)
     ├── kokoro/               # Kokoro onnx + voices
+    ├── piper/                # Piper voices (if TTS_ENGINE=piper)
     └── ollama/               # Ollama LLM store
 ```
 
