@@ -76,16 +76,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     )
     worker = PipelineWorker(pipeline, params=PipelineParams())
 
-    # NOTE: MoQ's handlers differ from SmallWebRTC's — on_client_connected takes only the
-    # transport, and disconnect is on_disconnected (not on_client_disconnected).
+    # NOTE: MoQ's handlers differ from SmallWebRTC's — they receive only the transport
+    # (no client argument).
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport):
         logger.info("MoQ client subscribed — greeting")
         await worker.queue_frames([TTSSpeakFrame(config.greeting())])
 
+    # A browser tab closing surfaces as the peer's broadcast going away
+    # (on_client_disconnected, new in Pipecat 1.7); the whole MoQ session ending
+    # fires on_disconnected. End the bot session on either.
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(_transport):
+        logger.info("MoQ client disconnected — ending session")
+        await worker.cancel()
+
     @transport.event_handler("on_disconnected")
     async def on_disconnected(_transport):
-        logger.info("MoQ client disconnected — ending session")
+        logger.info("MoQ session ended — ending session")
         await worker.cancel()
 
     @transport.event_handler("on_error")

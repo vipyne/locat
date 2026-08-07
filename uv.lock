@@ -919,7 +919,7 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "moq-rs", specifier = ">=0.3.2,<0.4.0" },
     { name = "num2words", specifier = ">=0.5.14" },
-    { name = "pipecat-ai", extras = ["kokoro", "mlx-whisper", "moq", "silero", "webrtc", "whisper"], specifier = ">=1.6.0" },
+    { name = "pipecat-ai", extras = ["kokoro", "mlx-whisper", "moq", "silero", "webrtc", "whisper"], specifier = ">=1.7.0" },
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'moonshine'" },
     { name = "pipecat-ai", extras = ["piper"], marker = "extra == 'piper'" },
     { name = "pipecat-ai-prebuilt", specifier = ">=1.0.5" },
@@ -1478,7 +1478,7 @@ wheels = [
 
 [[package]]
 name = "pipecat-ai"
-version = "1.6.0"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1502,9 +1502,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/12/18/75513bd13f3b8dacfedc3457b65f367c8324c3b5254d28d0a81608d4acfd/pipecat_ai-1.6.0.tar.gz", hash = "sha256:836d50e34e56b8d68aa06e204129c08510f68b763d027f71536d0f50c23f7d3b", size = 11690560, upload-time = "2026-07-21T20:14:45.642Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/bc/01e7d51462ab11f71bdd70469cad7aef654c92f2d9294101520bc528c291/pipecat_ai-1.7.0.tar.gz", hash = "sha256:d6cd4c7a55e8d2b5e9ff0c263f9a7c0de47b0ce6e7ffa81f85c6d5eece034b88", size = 11732539, upload-time = "2026-08-01T16:14:38.644Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/61/94f37f1b898e6625ebca74a0998358d14f2f3521762514676a8ce7d5b073/pipecat_ai-1.6.0-py3-none-any.whl", hash = "sha256:ec5f3659fc1743c359d559284ea9f701a48e26b369b01de24a2503677c1cab23", size = 11314604, upload-time = "2026-07-21T20:14:43.125Z" },
+    { url = "https://files.pythonhosted.org/packages/41/c8/9615e801905f6c6a3cbcb9d72dd81c90d5f5a9cc14110d30ade0ab2b7600/pipecat_ai-1.7.0-py3-none-any.whl", hash = "sha256:15bfc523899cf2f590e2a0c0f06dcd6a65d3c2700b8b29c930ca33ceca4073e5", size = 11343558, upload-time = "2026-08-01T16:14:36.299Z" },
 ]
 
 [package.optional-dependencies]

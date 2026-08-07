@@ -7,7 +7,7 @@ and text-to-speech are all local services, and the "transport†" is your machin
 audio hardware — the microphone and speakers.
 
 Built on the latest [Pipecat](https://github.com/pipecat-ai/pipecat) release
-(≥ 1.6). This repo is meant to double as a clear, reproducible **example** of how to
+(≥ 1.7). This repo is meant to double as a clear, reproducible **example** of how to
 wire up a fully-local Pipecat bot.
 
 The v1 personality is a **private financial thinking partner**: something you can
