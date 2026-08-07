@@ -86,7 +86,7 @@ Optionally copy the config template (everything is optional — the bot runs wit
 empty or absent `.env`):
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 ### 2. Fetch the models (the one-time online step)
@@ -216,7 +216,7 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 ## Configuration
 
 Every knob is an environment variable (read from `.env` if present). All are
-optional — the shown value is the default. See [`.env.example`](.env.example) for
+optional — the shown value is the default. See [`env.example`](env.example) for
 the copy-paste template.
 
 | Variable | Default | What it does |
@@ -281,7 +281,7 @@ locat/
 │   └── PLAN.md               #   the approved build plan the loop followed
 │
 ├── MODELS_TO_ADD.md          # engines considered but not (yet) wired — and why
-├── .env.example              # documented config knobs (copy to .env)
+├── env.example              # documented config knobs (copy to .env)
 ├── .python-version           # 3.12
 ├── pyproject.toml            # uv project + pinned deps
 ├── uv.lock                   # locked dependency versions

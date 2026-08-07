@@ -67,7 +67,7 @@ audio output + VAD + smart turn).
 locat/
 ├── .python-version              # 3.12
 ├── pyproject.toml               # uv project, pinned deps + extras
-├── .env.example                 # documented config knobs (copy to .env)
+├── env.example                 # documented config knobs (copy to .env)
 ├── .gitignore                   # excludes models/, .venv, .env
 ├── README.md                    # setup, model-pull, offline-test instructions
 ├── bot.py                       # the pipeline (main entry: `uv run bot.py`)
