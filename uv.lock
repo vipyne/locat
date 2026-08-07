@@ -906,17 +906,28 @@ dependencies = [
     { name = "textual" },
 ]
 
+[package.optional-dependencies]
+moonshine = [
+    { name = "pipecat-ai", extra = ["moonshine"] },
+]
+piper = [
+    { name = "pipecat-ai", extra = ["piper"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "moq-rs", specifier = ">=0.3.2,<0.4.0" },
     { name = "num2words", specifier = ">=0.5.14" },
     { name = "pipecat-ai", extras = ["kokoro", "mlx-whisper", "moq", "silero", "webrtc", "whisper"], specifier = ">=1.6.0" },
+    { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'moonshine'" },
+    { name = "pipecat-ai", extras = ["piper"], marker = "extra == 'piper'" },
     { name = "pipecat-ai-prebuilt", specifier = ">=1.0.5" },
     { name = "pyaudio", specifier = ">=0.2.14" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "textual", specifier = ">=8.2.8" },
 ]
+provides-extras = ["moonshine", "piper"]
 
 [[package]]
 name = "loguru"
@@ -1041,6 +1052,27 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/b7/a35232812a2ccfffcb7614ba96a91338551a660a0e9815cee668bf5743f0/mlx_whisper-0.4.3-py3-none-any.whl", hash = "sha256:6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489", size = 890544, upload-time = "2025-08-29T14:56:13.815Z" },
+]
+
+[[package]]
+name = "moonshine-voice"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "google-crc32c" },
+    { name = "numpy" },
+    { name = "platformdirs" },
+    { name = "requests" },
+    { name = "sounddevice" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/a4/6e128bb0f2fce9993e0ffd8e8b6214d1d7f694f880182339eedbb6f3f375/moonshine_voice-0.1.0-py3-none-macosx_15_0_arm64.whl", hash = "sha256:9c70431836ed805f9ab30adcdfe97018c17b1e932ba7e205fff0562950dc0913", size = 54399781, upload-time = "2026-07-27T21:01:03.631Z" },
+    { url = "https://files.pythonhosted.org/packages/45/99/6157236653594449575de6ef41abce70242c1a5a57c6dbaac408c2f99fe3/moonshine_voice-0.1.0-py3-none-manylinux_2_31_aarch64.manylinux_2_39_aarch64.whl", hash = "sha256:58d5546a656f65061d1d4a376818b08109fe25600a22dfdbbba0179ccb3f0d07", size = 55090195, upload-time = "2026-07-27T23:57:52.377Z" },
+    { url = "https://files.pythonhosted.org/packages/05/08/39d25f1ccc106720eb6122bc7a7ab029ac3c407be0f010a8855056b1f593/moonshine_voice-0.1.0-py3-none-manylinux_2_34_aarch64.whl", hash = "sha256:da54a99587edb987c8755f2c746cab72fada0e67cf847f7edfb8105447f405af", size = 55143464, upload-time = "2026-07-27T21:15:00.875Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/a3/e3c0156664e9505af7b23072c3e947cec3a7ee938764c70424051366c368/moonshine_voice-0.1.0-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:0f833deb43bad5dcfb4cfd3257b6df83ef9abd3f27be3199622fe41932e8d916", size = 56369045, upload-time = "2026-07-27T21:10:54.822Z" },
+    { url = "https://files.pythonhosted.org/packages/77/78/2e0fb469c6d236eb2782d6129d056a317e75d85efb340680617cebc8d82b/moonshine_voice-0.1.0-py3-none-win_amd64.whl", hash = "sha256:af2b8536ab08c48f33d5b1e126656b05ceae9a8980fc1c95dd70665b0b57c8e7", size = 50534088, upload-time = "2026-07-28T00:49:05.373Z" },
 ]
 
 [[package]]
@@ -1403,6 +1435,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pathvalidate"
+version = "3.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/2a/52a8da6fe965dea6192eb716b357558e103aea0a1e9a8352ad575a8406ca/pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177", size = 63262, upload-time = "2025-06-15T09:07:20.736Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/70/875f4a23bfc4731703a5835487d0d2fb999031bd415e7d17c0ae615c18b7/pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f", size = 24305, upload-time = "2025-06-15T09:07:19.117Z" },
+]
+
+[[package]]
 name = "phonemizer-fork"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1474,9 +1515,16 @@ kokoro = [
 mlx-whisper = [
     { name = "mlx-whisper" },
 ]
+moonshine = [
+    { name = "moonshine-voice" },
+]
 moq = [
     { name = "cryptography" },
     { name = "moq-rs" },
+]
+piper = [
+    { name = "piper-tts" },
+    { name = "requests" },
 ]
 webrtc = [
     { name = "aiortc" },
@@ -1496,6 +1544,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bd/17/3400108d390ef6fce66ae7ffe544541d6121ac6201182c737f3dd6e93a54/pipecat_ai_prebuilt-1.0.5.tar.gz", hash = "sha256:eee9e337fcd629e7d07d8cb0f0497de20a697b55f2b11505bf589397c6165c3d", size = 513198, upload-time = "2026-07-20T13:40:09.012Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/5e/159eededb2aa02640839d575853da36787dc0ae935cc19c07941c7e3ebd0/pipecat_ai_prebuilt-1.0.5-py3-none-any.whl", hash = "sha256:28eac25c16b2e8d34480edb15debc46ff425a3d077d78193417fd97f437d0380", size = 514703, upload-time = "2026-07-20T13:40:07.576Z" },
+]
+
+[[package]]
+name = "piper-tts"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "onnxruntime" },
+    { name = "pathvalidate" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/7d/2e97b591465abf75525e658df61cff4bcb34367d69b39b2ef19b1d533908/piper_tts-1.6.0.tar.gz", hash = "sha256:876952ba7e206957951943f24f0649415fc8c1c513bc8b7e58f2813bd01adb0a", size = 24250315, upload-time = "2026-07-23T16:11:44.946Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/70/0f/1cd99c8074eece70cc578b92c81392f52baa481d36e2cecb3e0bbf6c2a82/piper_tts-1.6.0-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:930c1fe1f275fd45b2b96079efe34dad08763e08d72a7a3351051ca17101cd92", size = 34090334, upload-time = "2026-07-23T16:11:19.397Z" },
+    { url = "https://files.pythonhosted.org/packages/08/8e/1331e87924c96553fe9d1492c49e281d21136cc66c11ed27e58e4c1d67d3/piper_tts-1.6.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:b37ddd191b31995fbe981d5900df9c15888cccf427bff8e0b368cc95489fd60a", size = 34098290, upload-time = "2026-07-23T16:11:24.259Z" },
+    { url = "https://files.pythonhosted.org/packages/87/c7/0839e798a8577e539105e74834165ea43c3898d0889dfd98b2037e28dd1a/piper_tts-1.6.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f42386c8674959f5f1cc396d54f9b4e417d1956cc87ab1daa7728f43ff1f5fa1", size = 34110310, upload-time = "2026-07-23T16:11:29.709Z" },
+    { url = "https://files.pythonhosted.org/packages/60/45/e4393b88d31672993c9b916c6847593f63c1fbf7db323f2446e4192182e9/piper_tts-1.6.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3120d5cc45e07fb99bdede8feef85116fd45bf488aa1d89c7b1aefb657d38683", size = 34109999, upload-time = "2026-07-23T16:11:35.069Z" },
+    { url = "https://files.pythonhosted.org/packages/63/0a/ce74581bbbff5ceae2aa51f322ae01cd8239590efe5784df3e1ffd018e18/piper_tts-1.6.0-cp39-abi3-win_amd64.whl", hash = "sha256:5f10915ff8193053303ae406d0f121e2e775b4a91309c0c89b0d8652a232c438", size = 34098254, upload-time = "2026-07-23T16:11:39.96Z" },
 ]
 
 [[package]]
@@ -2012,6 +2077,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sounddevice"
+version = "0.5.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/f9/2592608737553638fca98e21e54bfec40bf577bb98a61b2770c912aab25e/sounddevice-0.5.5.tar.gz", hash = "sha256:22487b65198cb5bf2208755105b524f78ad173e5ab6b445bdab1c989f6698df3", size = 143191, upload-time = "2026-01-23T18:36:43.529Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/0a/478e441fd049002cf308520c0d62dd8333e7c6cc8d997f0dda07b9fbcc46/sounddevice-0.5.5-py3-none-any.whl", hash = "sha256:30ff99f6c107f49d25ad16a45cacd8d91c25a1bcdd3e81a206b921a3a6405b1f", size = 32807, upload-time = "2026-01-23T18:36:35.649Z" },
+    { url = "https://files.pythonhosted.org/packages/56/f9/c037c35f6d0b6bc3bc7bfb314f1d6f1f9a341328ef47cd63fc4f850a7b27/sounddevice-0.5.5-py3-none-macosx_10_6_x86_64.macosx_10_6_universal2.whl", hash = "sha256:05eb9fd6c54c38d67741441c19164c0dae8ce80453af2d8c4ad2e7823d15b722", size = 108557, upload-time = "2026-01-23T18:36:37.41Z" },
+    { url = "https://files.pythonhosted.org/packages/88/a1/d19dd9889cd4bce2e233c4fac007cd8daaf5b9fe6e6a5d432cf17be0b807/sounddevice-0.5.5-py3-none-win32.whl", hash = "sha256:1234cc9b4c9df97b6cbe748146ae0ec64dd7d6e44739e8e42eaa5b595313a103", size = 317765, upload-time = "2026-01-23T18:36:39.047Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/0e/002ed7c4c1c2ab69031f78989d3b789fee3a7fba9e586eb2b81688bf4961/sounddevice-0.5.5-py3-none-win_amd64.whl", hash = "sha256:cfc6b2c49fb7f555591c78cb8ecf48d6a637fd5b6e1db5fec6ed9365d64b3519", size = 365324, upload-time = "2026-01-23T18:36:40.496Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/39/a61d4b83a7746b70d23d9173be688c0c6bfc7173772344b7442c2c155497/sounddevice-0.5.5-py3-none-win_arm64.whl", hash = "sha256:3861901ddd8230d2e0e8ae62ac320cdd4c688d81df89da036dcb812f757bb3e6", size = 317115, upload-time = "2026-01-23T18:36:42.235Z" },
 ]
 
 [[package]]

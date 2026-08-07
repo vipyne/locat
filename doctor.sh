@@ -2,18 +2,20 @@
 #
 # doctor.sh — report what this machine can handle for the offline voice bot.
 #
-# Checks the hard requirement (Apple Silicon — Whisper-MLX is MLX-only), then
-# compares total RAM against the configured LLM and suggests the best-fitting
-# qwen2.5 tag. Verbose mode adds a full hardware profile (CPU/GPU cores,
-# estimated memory bandwidth, disk) and a curated LLM catalog ranked by what
-# fits THIS machine — both memory footprint and estimated speech latency.
-# Interactive mode walks through choosing an STT / LLM / TTS-voice combo,
-# approves it against the hardware, and (only with your explicit confirmation)
-# writes it to .env and pulls missing models. Without -i it never writes.
+# Checks the hard requirement (Apple Silicon for the default Whisper-MLX STT),
+# compares total RAM against the configured LLM, and prints recommended
+# STT/LLM/TTS cascades sized to this machine. Verbose mode adds a full hardware
+# profile (CPU/GPU cores, estimated memory bandwidth, disk) and per-slot model
+# catalogs — every STT engine (Whisper-MLX, faster-whisper, Moonshine), the
+# curated Ollama LLM catalog ranked by fit (memory footprint AND estimated
+# speech latency), and both TTS engines (Kokoro, Piper). Interactive mode walks
+# through choosing an engine+model combo, approves it against the hardware, and
+# (only with your explicit confirmation) writes it to .env, installs missing
+# engine support, and pulls missing models. Without -i it never writes.
 #
 # Usage:
-#   ./doctor.sh          # pass/fail + model advice
-#   ./doctor.sh -v       # full capability matrix + model catalog
+#   ./doctor.sh          # pass/fail + recommended cascades
+#   ./doctor.sh -v       # full capability matrix + STT/LLM/TTS catalogs
 #   ./doctor.sh -i       # interactively pick & approve an STT/LLM/TTS combo
 #
 set -euo pipefail
@@ -73,7 +75,8 @@ LLM_CATALOG=(
   "deepseek-r1:70b|43|reasoning: thinks before speaking"
 )
 
-# Whisper-MLX variants: MLXModel member|display GB|GB rounded up|HF repo dir
+# STT engine tables. services.py builds whichever engine STT_ENGINE selects.
+# Whisper-MLX (Apple GPU): MLXModel member|display GB|GB rounded up|HF repo dir
 WHISPER_TABLE=(
   "TINY|0.2|1|whisper-tiny"
   "MEDIUM|1.5|2|whisper-medium-mlx"
@@ -83,10 +86,31 @@ WHISPER_TABLE=(
 )
 DEFAULT_WHISPER="LARGE_V3_TURBO"
 
-# Common Kokoro voice ids (voice choice never affects fit — the model is a
-# constant ~0.3 GB regardless).
+# faster-whisper (CPU): Model member|display GB|GB|HF cache dir|language note
+FASTER_WHISPER_TABLE=(
+  "TINY|0.1|1|Systran--faster-whisper-tiny|multilingual"
+  "BASE|0.15|1|Systran--faster-whisper-base|multilingual"
+  "SMALL|0.5|1|Systran--faster-whisper-small|multilingual"
+  "MEDIUM|1.5|2|Systran--faster-whisper-medium|multilingual"
+  "LARGE|3.0|3|Systran--faster-whisper-large-v3|multilingual"
+  "LARGE_V3_TURBO|1.6|2|deepdml--faster-whisper-large-v3-turbo-ct2|multilingual"
+  "DISTIL_LARGE_V2|1.5|2|Systran--faster-distil-whisper-large-v2|multilingual"
+  "DISTIL_MEDIUM_EN|0.8|1|Systran--faster-distil-whisper-medium.en|English-only (engine default)"
+)
+
+# Moonshine (CPU ONNX): Model member|display GB|GB|note
+MOONSHINE_TABLE=(
+  "TINY|0.1|1|smallest, fastest"
+  "BASE|0.2|1|good size/accuracy balance"
+  "SMALL_STREAMING|0.4|1|engine default"
+  "MEDIUM_STREAMING|1.0|1|largest, most accurate"
+)
+
+# TTS voices. Kokoro is one ~0.3 GB model with many voices; Piper voices are
+# individual ~60-120 MB models from huggingface.co/rhasspy/piper-voices.
 KOKORO_VOICES=(af_heart af_bella af_nicole af_sky am_adam am_michael bf_emma bm_george)
 DEFAULT_VOICE="af_heart"
+PIPER_VOICES=(en_US-lessac-medium en_US-amy-medium en_US-ryan-high en_GB-alba-medium en_GB-northern_english_male-medium)
 
 # Approximate in-memory size (GB, q4 quant) of an LLM tag; 0 = unknown.
 llm_needs_gb() {
@@ -105,9 +129,9 @@ llm_needs_gb() {
 OS="$(uname -s)"; ARCH="$(uname -m)"
 if [[ "$OS" != "Darwin" || "$ARCH" != "arm64" ]]; then
   echo "doctor: hardware check"
-  echo "  ❌ This is ${OS}/${ARCH} — the bot's STT (Whisper-MLX) requires an Apple"
-  echo "     Silicon Mac; MLX does not run here. On Linux, a different Whisper"
-  echo "     backend would be needed (not currently wired up)."
+  echo "  ❌ This is ${OS}/${ARCH} — the bot's default STT (Whisper-MLX) requires an"
+  echo "     Apple Silicon Mac; MLX does not run here. STT_ENGINE=faster_whisper"
+  echo "     (CPU) is the portable path, but this doctor only profiles macOS."
   echo
   echo "doctor: ❌ this machine cannot run the bot as configured"
   exit 1
@@ -115,7 +139,9 @@ fi
 
 # --- Hardware profile (shared by every mode) --------------------------------
 CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Apple Silicon')"
-RAM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+# DOCTOR_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
+# e.g.:  DOCTOR_RAM_GB=8 ./doctor.sh -v
+RAM_GB="${DOCTOR_RAM_GB:-$(( $(sysctl -n hw.memsize) / 1073741824 ))}"
 GPU_CORES="$(system_profiler SPDisplaysDataType 2>/dev/null \
   | awk -F': ' '/Total Number of Cores/{print $2; exit}' || :)"
 CPU_CORES="$(sysctl -n hw.physicalcpu 2>/dev/null || :)"
@@ -150,7 +176,7 @@ llm_verdict() {
   fi
 }
 
-# --- Installed-model detection (read-only: never starts a server) -----------
+# --- Installed-model / engine-support detection (read-only) -----------------
 OLLAMA_MODELS="${OLLAMA_MODELS:-$REPO/models/ollama}"
 INSTALLED_TAGS=""
 if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then
@@ -167,8 +193,22 @@ llm_installed() {
   return 1
 }
 
-whisper_installed() {  # $1 = HF repo dir suffix, e.g. whisper-large-v3-turbo
-  [[ -d "${HF_HOME:-$REPO/models/huggingface}/hub/models--mlx-community--$1" ]]
+hf_model_installed() {  # $1 = HF cache dir suffix, e.g. mlx-community--whisper-tiny
+  [[ -d "${HF_HOME:-$REPO/models/huggingface}/hub/models--$1" ]]
+}
+
+piper_voice_installed() {  # $1 = piper voice id
+  [[ -f "${PIPER_DOWNLOAD_DIR:-$REPO/models/piper}/$1.onnx" ]]
+}
+
+# Optional-engine support: MOONSHINE_OK / PIPER_OK = 1 when the extra's package
+# is importable in the venv. One uv invocation, spec lookup only (no imports).
+MOONSHINE_OK=0; PIPER_OK=0
+probe_engine_support() {
+  local out
+  out="$(uv run python -c 'import importlib.util as u
+print(int(u.find_spec("moonshine_voice") is not None), int(u.find_spec("piper") is not None))' 2>/dev/null || echo "0 0")"
+  MOONSHINE_OK="${out%% *}"; PIPER_OK="${out##* }"
 }
 
 # Catalog rows, best-fitting first: "rank|gb|tag|tok/s|verdict|installed|note"
@@ -203,6 +243,43 @@ print_catalog_table() {  # $1 = "numbered" to prefix row numbers (for -i)
   IFS="$OLD_IFS"
 }
 
+# Recommended STT+LLM+TTS cascades, computed from the catalog for THIS machine.
+# Thinking/reasoning LLMs are excluded — they burn seconds "thinking" before the
+# first spoken word — but remain in the catalog for deliberate picking via -i.
+print_cascades() {
+  local rows quality balanced snappy
+  rows="$(sorted_catalog_rows | awk -F'|' '$1==0 && $7 !~ /thinking|reasoning/')"
+  [[ -z "$rows" ]] && return 0
+  quality="$(echo "$rows" | head -1)"                            # largest that fits ✅
+  balanced="$(echo "$rows" | awk -F'|' '$4>=25{print; exit}')"   # largest at ≥25 tok/s
+  snappy="$(echo "$rows" | awk -F'|' '$4>=100{print; exit}')"    # largest at ≥100 tok/s
+
+  local q_stt="LARGE_V3_TURBO"; (( RAM_GB >= 16 )) && q_stt="LARGE_V3"
+  echo "doctor: recommended cascades for this machine"
+  print_cascade_row "balanced"     "$balanced" "LARGE_V3_TURBO"    2
+  [[ "$(row_tag "$quality")" != "$(row_tag "$balanced")" ]] \
+    && print_cascade_row "best quality" "$quality" "$q_stt" "$( [[ $q_stt == LARGE_V3 ]] && echo 3 || echo 2 )"
+  [[ "$(row_tag "$snappy")" != "$(row_tag "$balanced")" ]] \
+    && print_cascade_row "snappiest"    "$snappy"  "LARGE_V3_TURBO_Q4" 1
+  echo "  (apply one with ./doctor.sh -i)"
+}
+
+row_tag() { echo "${1:-}" | cut -d'|' -f3; }
+
+print_cascade_row() {  # tier-name  catalog-row  whisper-name  whisper-int-gb
+  local name=$1 row=$2 wname=$3 wgb=$4 tag gb tok wdisp entry
+  [[ -z "$row" ]] && return 0
+  tag="$(echo "$row" | cut -d'|' -f3)"
+  gb="$(echo "$row" | cut -d'|' -f2)"
+  tok="$(echo "$row" | cut -d'|' -f4)"
+  wdisp=""
+  for entry in "${WHISPER_TABLE[@]}"; do
+    [[ "${entry%%|*}" == "$wname" ]] && wdisp="$(echo "$entry" | cut -d'|' -f2)"
+  done
+  printf "  %-13s STT %s ~%sGB · LLM %s ~%sGB ~%stok/s · TTS Kokoro %s   ≈%d GB\n" \
+    "$name" "$wname" "$wdisp" "$tag" "$gb" "$tok" "$DEFAULT_VOICE" $(( gb + wgb + 1 ))
+}
+
 print_hardware_profile() {
   echo "  chip:       ${CHIP}"
   echo "  macOS:      ${MACOS_VER:-unknown}"
@@ -217,8 +294,130 @@ print_hardware_profile() {
   echo "  free disk:  ${FREE_DISK} available on this volume"
 }
 
+# Fit verdict for an STT/TTS model of $1 (rounded-up) GB. Same headroom idea as
+# llm_verdict, from the other side: the model must coexist with an LLM + OS.
+stt_verdict() {
+  local gb=$1
+  if   (( gb + 6 <= RAM_GB )); then echo "✅ good"
+  elif (( gb + 4 <= RAM_GB )); then echo "⚠️  tight"
+  else                              echo "❌ too big"
+  fi
+}
+
+# Print an STT engine group's rows with continuous numbering.
+# $1=table-array-name is not portable in bash 3.2, so each group is explicit.
+print_whisper_mlx_rows() {  # $1 = "numbered"|"plain"; increments STT_N
+  local entry name disp verdict mark inst
+  for entry in "${WHISPER_TABLE[@]}"; do
+    STT_N=$((STT_N + 1))
+    name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
+    verdict="$(stt_verdict "$(echo "$entry" | cut -d'|' -f3)")"
+    mark=""; [[ "$name" == "$DEFAULT_WHISPER" ]] && mark="(default)"
+    inst=""; hf_model_installed "mlx-community--$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
+    if [[ "$1" == "numbered" ]]; then
+      printf "  %3d) %-18s ~%s GB  %-12s %-10s %s\n" "$STT_N" "$name" "$disp" "$verdict" "$mark" "$inst"
+    else
+      printf "     %-18s ~%s GB  %-12s %-10s %s\n" "$name" "$disp" "$verdict" "$mark" "$inst"
+    fi
+  done
+}
+
+print_faster_whisper_rows() {
+  local entry name disp verdict note inst
+  for entry in "${FASTER_WHISPER_TABLE[@]}"; do
+    STT_N=$((STT_N + 1))
+    name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
+    verdict="$(stt_verdict "$(echo "$entry" | cut -d'|' -f3)")"
+    # The full-size (non-distilled, non-turbo) models transcribe slowly on CPU
+    # even when they fit in RAM — a latency problem, not a memory one.
+    case "$name" in MEDIUM|LARGE) [[ "$verdict" == "✅ good" ]] && verdict="⚠️  slow on CPU" ;; esac
+    note="$(echo "$entry" | cut -d'|' -f5)"
+    inst=""; hf_model_installed "$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
+    if [[ "$1" == "numbered" ]]; then
+      printf "  %3d) %-18s ~%s GB  %-16s %-28s %s\n" "$STT_N" "$name" "$disp" "$verdict" "$note" "$inst"
+    else
+      printf "     %-18s ~%s GB  %-16s %-28s %s\n" "$name" "$disp" "$verdict" "$note" "$inst"
+    fi
+  done
+}
+
+print_moonshine_rows() {
+  local entry name disp verdict note
+  for entry in "${MOONSHINE_TABLE[@]}"; do
+    STT_N=$((STT_N + 1))
+    name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
+    verdict="$(stt_verdict "$(echo "$entry" | cut -d'|' -f3)")"
+    note="$(echo "$entry" | cut -d'|' -f4)"
+    if [[ "$1" == "numbered" ]]; then
+      printf "  %3d) %-18s ~%s GB  %-12s %s\n" "$STT_N" "$name" "$disp" "$verdict" "$note"
+    else
+      printf "     %-18s ~%s GB  %-12s %s\n" "$name" "$disp" "$verdict" "$note"
+    fi
+  done
+}
+
+moonshine_hint() { (( MOONSHINE_OK )) || echo " · needs: uv sync --extra moonshine"; }
+piper_hint()     { (( PIPER_OK ))     || echo " · needs: uv sync --extra piper"; }
+
+print_stt_groups() {  # $1 = "numbered"|"plain"
+  STT_N=0
+  echo "  Whisper-MLX (Apple GPU · multilingual)"
+  print_whisper_mlx_rows "$1"
+  echo "  faster-whisper (CPU · the non-Apple-Silicon path)"
+  print_faster_whisper_rows "$1"
+  echo "  Moonshine (CPU ONNX · English + a few languages$(moonshine_hint))"
+  print_moonshine_rows "$1"
+}
+
+print_tts_groups() {  # $1 = "numbered"|"plain"
+  local v mark inst
+  TTS_N=0
+  echo "  Kokoro (ONNX · one ~0.3 GB model, voice is just a setting · $(stt_verdict 1))"
+  for v in "${KOKORO_VOICES[@]}"; do
+    TTS_N=$((TTS_N + 1))
+    mark=""; [[ "$v" == "$DEFAULT_VOICE" ]] && mark="(default)"
+    if [[ "$1" == "numbered" ]]; then
+      printf "  %3d) %-36s %s\n" "$TTS_N" "$v" "$mark"
+    else
+      printf "     %-36s %s\n" "$v" "$mark"
+    fi
+  done
+  echo "  Piper (each voice its own ~0.1 GB model · GPL-3.0 · $(stt_verdict 1)$(piper_hint))"
+  for v in "${PIPER_VOICES[@]}"; do
+    TTS_N=$((TTS_N + 1))
+    inst=""; piper_voice_installed "$v" && inst="(installed)"
+    if [[ "$1" == "numbered" ]]; then
+      printf "  %3d) %-36s %s\n" "$TTS_N" "$v" "$inst"
+    else
+      printf "     %-36s %s\n" "$v" "$inst"
+    fi
+  done
+}
+
+# Resolve STT pick number $1 -> sets CHOSEN_STT_ENGINE/MODEL/GB/DISP/HFDIR.
+resolve_stt_pick() {
+  local n=$1 entry
+  local w=${#WHISPER_TABLE[@]} f=${#FASTER_WHISPER_TABLE[@]}
+  if (( n <= w )); then
+    entry="${WHISPER_TABLE[$((n - 1))]}"
+    CHOSEN_STT_ENGINE="whisper_mlx"
+    CHOSEN_STT_HFDIR="mlx-community--$(echo "$entry" | cut -d'|' -f4)"
+  elif (( n <= w + f )); then
+    entry="${FASTER_WHISPER_TABLE[$((n - w - 1))]}"
+    CHOSEN_STT_ENGINE="faster_whisper"
+    CHOSEN_STT_HFDIR="$(echo "$entry" | cut -d'|' -f4)"
+  else
+    entry="${MOONSHINE_TABLE[$((n - w - f - 1))]}"
+    CHOSEN_STT_ENGINE="moonshine"
+    CHOSEN_STT_HFDIR=""
+  fi
+  CHOSEN_STT_MODEL="$(echo "$entry" | cut -d'|' -f1)"
+  CHOSEN_STT_DISP="$(echo "$entry" | cut -d'|' -f2)"
+  STT_GB="$(echo "$entry" | cut -d'|' -f3)"
+}
+
 # =============================================================================
-# Interactive mode: pick STT + LLM + TTS voice, approve, optionally apply.
+# Interactive mode: pick STT + LLM + TTS, approve, optionally apply.
 # =============================================================================
 if (( INTERACTIVE )); then
   if [[ ! -t 0 ]]; then
@@ -229,33 +428,21 @@ if (( INTERACTIVE )); then
   echo "doctor: interactive model picker"
   echo
   print_hardware_profile
+  probe_engine_support
   echo
 
   # --- STT ------------------------------------------------------------------
-  echo "STT — Whisper-MLX variant:"
-  i=0
-  for entry in "${WHISPER_TABLE[@]}"; do
-    i=$((i + 1))
-    name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
-    mark=""; [[ "$name" == "$DEFAULT_WHISPER" ]] && mark="(default)"
-    inst=""; whisper_installed "$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
-    printf "  %3d) %-18s ~%s GB  %-10s %s\n" "$i" "$name" "$disp" "$mark" "$inst"
-  done
+  echo "STT — speech-to-text engine + model:"
+  print_stt_groups numbered
+  STT_TOTAL=$STT_N
   read -r -p "choose STT [default ${DEFAULT_WHISPER}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    CHOSEN_STT="$DEFAULT_WHISPER"
-  elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#WHISPER_TABLE[@]} )); then
-    CHOSEN_STT="$(echo "${WHISPER_TABLE[$((ans - 1))]}" | cut -d'|' -f1)"
+    resolve_stt_pick 4  # LARGE_V3_TURBO's position in WHISPER_TABLE
+  elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= STT_TOTAL )); then
+    resolve_stt_pick "$ans"
   else
     echo "doctor: '$ans' is not a valid choice" >&2; exit 1
   fi
-  STT_GB=0; STT_REPO=""
-  for entry in "${WHISPER_TABLE[@]}"; do
-    if [[ "${entry%%|*}" == "$CHOSEN_STT" ]]; then
-      STT_GB="$(echo "$entry" | cut -d'|' -f3)"
-      STT_REPO="$(echo "$entry" | cut -d'|' -f4)"
-    fi
-  done
   echo
 
   # --- LLM ------------------------------------------------------------------
@@ -273,28 +460,28 @@ if (( INTERACTIVE )); then
   LLM_GB="$(llm_needs_gb "$CHOSEN_LLM")"
   echo
 
-  # --- TTS voice ------------------------------------------------------------
-  echo "TTS — Kokoro voice (model is a constant ~0.3 GB; voice never affects fit):"
-  i=0
-  for v in "${KOKORO_VOICES[@]}"; do
-    i=$((i + 1))
-    mark=""; [[ "$v" == "$DEFAULT_VOICE" ]] && mark="(default)"
-    printf "  %3d) %-12s %s\n" "$i" "$v" "$mark"
-  done
+  # --- TTS ------------------------------------------------------------------
+  echo "TTS — text-to-speech engine + voice (all tiny next to the LLM):"
+  print_tts_groups numbered
+  TTS_TOTAL=$TTS_N
   read -r -p "choose voice [default ${DEFAULT_VOICE}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    CHOSEN_VOICE="$DEFAULT_VOICE"
-  elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#KOKORO_VOICES[@]} )); then
-    CHOSEN_VOICE="${KOKORO_VOICES[$((ans - 1))]}"
+    CHOSEN_TTS_ENGINE="kokoro"; CHOSEN_VOICE="$DEFAULT_VOICE"
+  elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= TTS_TOTAL )); then
+    if (( ans <= ${#KOKORO_VOICES[@]} )); then
+      CHOSEN_TTS_ENGINE="kokoro"; CHOSEN_VOICE="${KOKORO_VOICES[$((ans - 1))]}"
+    else
+      CHOSEN_TTS_ENGINE="piper"; CHOSEN_VOICE="${PIPER_VOICES[$((ans - ${#KOKORO_VOICES[@]} - 1))]}"
+    fi
   else
-    CHOSEN_VOICE="$ans"  # any Kokoro voice id is fine
+    CHOSEN_TTS_ENGINE="kokoro"; CHOSEN_VOICE="$ans"  # any Kokoro voice id
   fi
   echo
 
   # --- Combo verdict --------------------------------------------------------
-  echo "doctor: combo check — STT ${CHOSEN_STT} + LLM ${CHOSEN_LLM} + voice ${CHOSEN_VOICE}"
+  echo "doctor: combo check — STT ${CHOSEN_STT_ENGINE}/${CHOSEN_STT_MODEL} + LLM ${CHOSEN_LLM} + TTS ${CHOSEN_TTS_ENGINE}/${CHOSEN_VOICE}"
   TOK="$(est_tok_s "$LLM_GB")"
-  TOTAL=$(( LLM_GB + STT_GB + 1 ))   # +1 ≈ Kokoro (0.3) rounded up
+  TOTAL=$(( LLM_GB + STT_GB + 1 ))   # +1 ≈ TTS (Kokoro 0.3 / Piper 0.1) rounded up
   SUGGEST="$(sorted_catalog_rows | awk -F'|' '$1==0{print $3; exit}')"
   APPROVED=1
   if (( LLM_GB == 0 )); then
@@ -312,18 +499,31 @@ if (( INTERACTIVE )); then
   else
     pass "APPROVED: ~${TOTAL} GB of ${RAM_GB} GB, ~${TOK} tok/s — comfortable"
   fi
+
+  # Which model var the chosen STT engine reads (see config.py).
+  case "$CHOSEN_STT_ENGINE" in
+    whisper_mlx)    STT_MODEL_VAR="WHISPER_MODEL" ;;
+    faster_whisper) STT_MODEL_VAR="FASTER_WHISPER_MODEL" ;;
+    moonshine)      STT_MODEL_VAR="MOONSHINE_MODEL" ;;
+  esac
+  case "$CHOSEN_TTS_ENGINE" in
+    kokoro) TTS_VOICE_VAR="KOKORO_VOICE" ;;
+    piper)  TTS_VOICE_VAR="PIPER_VOICE" ;;
+  esac
   echo
   echo "  .env lines for this combo:"
-  echo "     WHISPER_MODEL=${CHOSEN_STT}"
+  echo "     STT_ENGINE=${CHOSEN_STT_ENGINE}"
+  echo "     ${STT_MODEL_VAR}=${CHOSEN_STT_MODEL}"
   echo "     LLM_MODEL=${CHOSEN_LLM}"
-  echo "     KOKORO_VOICE=${CHOSEN_VOICE}"
+  echo "     TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
+  echo "     ${TTS_VOICE_VAR}=${CHOSEN_VOICE}"
   echo
   if (( ! APPROVED )); then
     read -r -p "combo was rejected — continue anyway? [y/N] " ans || ans=""
     [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: no changes made"; exit 1; }
   fi
 
-  # --- Apply: write .env (with backup), only the three model keys -----------
+  # --- Apply: write .env (with backup), only the model/engine keys ----------
   env_set() {  # KEY VALUE — update in place or append; never touches other lines
     if [[ -f .env ]] && grep -q "^$1=" .env; then
       sed -i '' "s|^$1=.*|$1=$2|" .env
@@ -334,21 +534,50 @@ if (( INTERACTIVE )); then
   read -r -p "write these to .env? (existing .env backed up to .env.bak) [y/N] " ans || ans=""
   if [[ "$ans" =~ ^[Yy] ]]; then
     [[ -f .env ]] && cp .env .env.bak
-    env_set WHISPER_MODEL "$CHOSEN_STT"
+    env_set STT_ENGINE "$CHOSEN_STT_ENGINE"
+    env_set "$STT_MODEL_VAR" "$CHOSEN_STT_MODEL"
     env_set LLM_MODEL "$CHOSEN_LLM"
-    env_set KOKORO_VOICE "$CHOSEN_VOICE"
-    pass "wrote .env (WHISPER_MODEL, LLM_MODEL, KOKORO_VOICE)"
+    env_set TTS_ENGINE "$CHOSEN_TTS_ENGINE"
+    env_set "$TTS_VOICE_VAR" "$CHOSEN_VOICE"
+    pass "wrote .env (STT_ENGINE, ${STT_MODEL_VAR}, LLM_MODEL, TTS_ENGINE, ${TTS_VOICE_VAR})"
   else
     echo "  skipped — paste the lines above into .env yourself if you want them"
   fi
 
+  # --- Apply: install missing engine support (uv sync --extra ...) ----------
+  NEED_MOONSHINE=0; NEED_PIPER=0
+  [[ "$CHOSEN_STT_ENGINE" == "moonshine" ]] && (( ! MOONSHINE_OK )) && NEED_MOONSHINE=1
+  [[ "$CHOSEN_TTS_ENGINE" == "piper" ]]     && (( ! PIPER_OK ))     && NEED_PIPER=1
+  if (( NEED_MOONSHINE || NEED_PIPER )); then
+    # uv sync removes extras not listed, so pass every extra that is either
+    # already present or newly needed — never uninstall the other engine.
+    EXTRA_FLAGS=""
+    (( MOONSHINE_OK || NEED_MOONSHINE )) && EXTRA_FLAGS="$EXTRA_FLAGS --extra moonshine"
+    (( PIPER_OK || NEED_PIPER ))         && EXTRA_FLAGS="$EXTRA_FLAGS --extra piper"
+    echo
+    (( NEED_MOONSHINE )) && echo "  missing: Moonshine engine support (python package)"
+    (( NEED_PIPER ))     && echo "  missing: Piper engine support (python package)"
+    read -r -p "install engine support now? (runs: uv sync${EXTRA_FLAGS}) [y/N] " ans || ans=""
+    if [[ "$ans" =~ ^[Yy] ]]; then
+      # shellcheck disable=SC2086
+      if uv sync $EXTRA_FLAGS; then
+        pass "engine support installed"
+      else
+        warn "uv sync failed — run 'uv sync${EXTRA_FLAGS}' manually"
+      fi
+    else
+      echo "  skipped — the bot will exit with the same uv sync command if you use this engine"
+    fi
+  fi
+
   # --- Apply: pull whatever is missing (needs network) ----------------------
-  NEED_LLM=0;     llm_installed "$CHOSEN_LLM"      || NEED_LLM=1
-  NEED_WHISPER=0; whisper_installed "$STT_REPO"    || NEED_WHISPER=1
+  NEED_LLM=0; llm_installed "$CHOSEN_LLM" || NEED_LLM=1
+  NEED_WHISPER=0
+  [[ "$CHOSEN_STT_ENGINE" == "whisper_mlx" ]] && ! hf_model_installed "$CHOSEN_STT_HFDIR" && NEED_WHISPER=1
   if (( NEED_LLM || NEED_WHISPER )); then
     echo
     (( NEED_LLM ))     && echo "  missing: LLM ${CHOSEN_LLM}"
-    (( NEED_WHISPER )) && echo "  missing: Whisper ${CHOSEN_STT}"
+    (( NEED_WHISPER )) && echo "  missing: Whisper-MLX ${CHOSEN_STT_MODEL}"
     read -r -p "pull missing models now? (needs network) [y/N] " ans || ans=""
     if [[ "$ans" =~ ^[Yy] ]]; then
       if (( NEED_LLM )); then
@@ -362,17 +591,24 @@ if (( INTERACTIVE )); then
       fi
       if (( NEED_WHISPER )); then
         if command -v uv >/dev/null 2>&1; then
-          if ! WHISPER_MODEL="$CHOSEN_STT" uv run python scripts/prefetch_models.py; then
-            warn "whisper prefetch failed — retry with: WHISPER_MODEL=${CHOSEN_STT} uv run python scripts/prefetch_models.py"
+          if ! WHISPER_MODEL="$CHOSEN_STT_MODEL" uv run python scripts/prefetch_models.py; then
+            warn "whisper prefetch failed — retry with: WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
           fi
         else
-          warn "uv not on PATH — install it, then: WHISPER_MODEL=${CHOSEN_STT} uv run python scripts/prefetch_models.py"
+          warn "uv not on PATH — install it, then: WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
         fi
       fi
     else
       echo "  skipped — models will be fetched on first use (needs network then)"
     fi
   fi
+  case "$CHOSEN_STT_ENGINE" in
+    faster_whisper) hf_model_installed "$CHOSEN_STT_HFDIR" \
+      || echo "  note: faster-whisper ${CHOSEN_STT_MODEL} downloads on first use (needs network once)" ;;
+    moonshine) echo "  note: Moonshine ${CHOSEN_STT_MODEL} downloads on first use (needs network once)" ;;
+  esac
+  [[ "$CHOSEN_TTS_ENGINE" == "piper" ]] && ! piper_voice_installed "$CHOSEN_VOICE" \
+    && echo "  note: Piper voice ${CHOSEN_VOICE} downloads on first use (needs network once)"
 
   echo
   echo "doctor: ✅ combo ready — ./start.sh"
@@ -409,8 +645,12 @@ echo
 uv run python scripts/print_models.py 2>/dev/null \
   || warn "could not resolve models — run 'uv sync'"
 
+echo
+print_cascades
+
 # --- Verbose: full capability matrix ----------------------------------------
 if (( VERBOSE )); then
+  probe_engine_support
   echo
   echo "doctor: hardware profile"
   print_hardware_profile
@@ -429,20 +669,24 @@ if (( VERBOSE )); then
   done
 
   echo
-  echo "doctor: LLM catalog on ${RAM_GB} GB / ~${BW} GB/s (q4; best fits first; ~2 GB STT/TTS + OS headroom)"
+  echo "doctor: LLM catalog"
+  echo "  [on ${RAM_GB} GB / ~${BW} GB/s · sizes are 4-bit quantized (\"q4\", Ollama's default) · best fits first · assumes ~2 GB STT/TTS + OS headroom]"
+  echo
+  echo "  Ollama (local server · registry: ollama.com/library)"
   print_catalog_table
   echo "  (pick interactively with ./doctor.sh -i)"
 
   echo
-  echo "doctor: Whisper-MLX variants (all fine on ≥8 GB unless marked)"
-  for entry in "${WHISPER_TABLE[@]}"; do
-    name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
-    verdict="✅"
-    [[ "$name" == "LARGE_V3" ]] && (( RAM_GB < 16 )) && verdict="⚠️  tight"
-    [[ "$name" == "$DEFAULT_WHISPER" ]] && verdict="$verdict  (default)"
-    inst=""; whisper_installed "$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
-    printf "     %-18s ~%s GB  %-14s %s\n" "$name" "$disp" "$verdict" "$inst"
-  done
+  echo "doctor: STT catalog"
+  echo "  [speech-to-text · engine chosen by STT_ENGINE, built in services.py · verdicts assume an LLM + OS alongside]"
+  echo
+  print_stt_groups plain
+
+  echo
+  echo "doctor: TTS catalog"
+  echo "  [text-to-speech · engine chosen by TTS_ENGINE, built in services.py · tiny next to the LLM]"
+  echo
+  print_tts_groups plain
 fi
 
 echo
