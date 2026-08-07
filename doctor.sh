@@ -279,38 +279,112 @@ print_catalog_table() {  # $1 = "numbered" to prefix row numbers (for -i)
 # Recommended STT+LLM+TTS cascades, computed from the catalog for THIS machine.
 # Thinking/reasoning LLMs are excluded — they burn seconds "thinking" before the
 # first spoken word — but remain in the catalog for deliberate picking via -i.
-print_cascades() {
-  local rows quality balanced snappy
+# The recommended cascades, computed once into parallel arrays (bash 3.2 has
+# no associative arrays). Model numbers in all cascade output match the
+# models' positions in the -i menus, so a recommendation can be applied by
+# just typing the same numbers there.
+CAS_NAMES=(); CAS_ROWS=(); CAS_WNAMES=(); CAS_WGBS=()
+
+compute_cascades() {
+  (( ${#CAS_NAMES[@]} )) && return 0  # already computed
+  local rows quality balanced snappy q_stt
   rows="$(sorted_catalog_rows | awk -F'|' '$1==0 && $7 !~ /thinking|reasoning/')"
   [[ -z "$rows" ]] && return 0
   quality="$(echo "$rows" | head -1)"                            # largest that fits ✅
   balanced="$(echo "$rows" | awk -F'|' '$4>=25{print; exit}')"   # largest at ≥25 tok/s
   snappy="$(echo "$rows" | awk -F'|' '$4>=100{print; exit}')"    # largest at ≥100 tok/s
 
-  local q_stt="LARGE_V3_TURBO"; (( RAM_GB >= 16 )) && q_stt="LARGE_V3"
-  echo "doctor: recommended cascades for this machine"
-  print_cascade_row "balanced"     "$balanced" "LARGE_V3_TURBO"    2
+  q_stt="LARGE_V3_TURBO"; (( RAM_GB >= 16 )) && q_stt="LARGE_V3"
+  add_cascade "balanced"     "$balanced" "LARGE_V3_TURBO"    2
   [[ "$(row_tag "$quality")" != "$(row_tag "$balanced")" ]] \
-    && print_cascade_row "best quality" "$quality" "$q_stt" "$( [[ $q_stt == LARGE_V3 ]] && echo 3 || echo 2 )"
+    && add_cascade "best quality" "$quality" "$q_stt" "$( [[ $q_stt == LARGE_V3 ]] && echo 3 || echo 2 )"
   [[ "$(row_tag "$snappy")" != "$(row_tag "$balanced")" ]] \
-    && print_cascade_row "snappiest"    "$snappy"  "LARGE_V3_TURBO_Q4" 1
-  echo "  (apply one with ./doctor.sh -i)"
+    && add_cascade "snappiest"    "$snappy"  "LARGE_V3_TURBO_Q4" 1
+  return 0
+}
+
+add_cascade() {  # tier-name  catalog-row  whisper-name  whisper-int-gb
+  [[ -z "$2" ]] && return 0
+  CAS_NAMES+=("$1"); CAS_ROWS+=("$2"); CAS_WNAMES+=("$3"); CAS_WGBS+=("$4")
 }
 
 row_tag() { echo "${1:-}" | cut -d'|' -f3; }
 
-print_cascade_row() {  # tier-name  catalog-row  whisper-name  whisper-int-gb
-  local name=$1 row=$2 wname=$3 wgb=$4 tag gb tok wdisp entry
-  [[ -z "$row" ]] && return 0
+whisper_lookup() {  # $1 = Whisper-MLX name → sets WNUM (menu number) + WDISP (~GB)
+  local entry i=0; WNUM=0; WDISP=""
+  for entry in "${WHISPER_TABLE[@]}"; do
+    i=$((i + 1))
+    [[ "${entry%%|*}" == "$1" ]] && { WNUM=$i; WDISP="$(echo "$entry" | cut -d'|' -f2)"; }
+  done
+  return 0
+}
+
+llm_menu_num() { sorted_catalog_rows | awk -F'|' -v t="$1" '$3==t{print NR; exit}'; }
+
+kokoro_menu_num() {  # voice id → its number in the -i TTS menu (Kokoro is listed first)
+  local v i=0
+  for v in "${KOKORO_VOICES[@]}"; do
+    i=$((i + 1))
+    [[ "$v" == "$1" ]] && { echo "$i"; return 0; }
+  done
+  echo 1
+}
+
+cascade_stt_line() {  # $1 = tier index
+  whisper_lookup "${CAS_WNAMES[$1]}"
+  printf "%2d) %s ~%sGB" "$WNUM" "${CAS_WNAMES[$1]}" "$WDISP"
+}
+
+cascade_llm_line() {  # $1 = tier index
+  local row="${CAS_ROWS[$1]}" tag gb tok
   tag="$(echo "$row" | cut -d'|' -f3)"
   gb="$(echo "$row" | cut -d'|' -f2)"
   tok="$(echo "$row" | cut -d'|' -f4)"
-  wdisp=""
-  for entry in "${WHISPER_TABLE[@]}"; do
-    [[ "${entry%%|*}" == "$wname" ]] && wdisp="$(echo "$entry" | cut -d'|' -f2)"
+  printf "%2d) %s ~%sGB ~%stok/s" "$(llm_menu_num "$tag")" "$tag" "$gb" "$tok"
+}
+
+cascade_total_gb() {  # $1 = tier index → ≈GB for the whole cascade
+  local gb; gb="$(echo "${CAS_ROWS[$1]}" | cut -d'|' -f2)"
+  echo $(( gb + CAS_WGBS[$1] + 1 ))
+}
+
+print_cascades() {
+  compute_cascades
+  (( ${#CAS_NAMES[@]} )) || return 0
+  local i
+  echo "doctor: recommended cascades for this machine"
+  for i in $(seq 0 $(( ${#CAS_NAMES[@]} - 1 ))); do
+    echo "  ${CAS_NAMES[$i]}"
+    echo "    STT $(cascade_stt_line "$i")"
+    echo "    LLM $(cascade_llm_line "$i")"
+    printf "    TTS %2d) Kokoro %s   ≈%d GB\n" \
+      "$(kokoro_menu_num "$DEFAULT_VOICE")" "$DEFAULT_VOICE" "$(cascade_total_gb "$i")"
   done
-  printf "  %-13s STT %s ~%sGB · LLM %s ~%sGB ~%stok/s · TTS Kokoro %s   ≈%d GB\n" \
-    "$name" "$wname" "$wdisp" "$tag" "$gb" "$tok" "$DEFAULT_VOICE" $(( gb + wgb + 1 ))
+  # No point advertising -i to someone already running it.
+  (( INTERACTIVE )) || echo "  (apply one with ./doctor.sh -i)"
+}
+
+print_slot_reccos() {  # $1 = stt|llm|tts — reprint one slot's recommendations above its -i menu
+  compute_cascades
+  (( ${#CAS_NAMES[@]} )) || return 0
+  local i
+  echo
+  if [[ "$1" == "tts" ]]; then
+    # Every cascade recommends the default voice, so one line covers them all.
+    printf "  recommended:   %2d) Kokoro %s   (all cascades)\n" \
+      "$(kokoro_menu_num "$DEFAULT_VOICE")" "$DEFAULT_VOICE"
+    echo
+    return 0
+  fi
+  echo "  recommended:"
+  for i in $(seq 0 $(( ${#CAS_NAMES[@]} - 1 ))); do
+    case "$1" in
+      stt) printf "    %-13s %s\n" "${CAS_NAMES[$i]}" "$(cascade_stt_line "$i")" ;;
+      llm) printf "    %-13s %s\n" "${CAS_NAMES[$i]}" "$(cascade_llm_line "$i")" ;;
+    esac
+  done
+  echo
+  return 0
 }
 
 print_hardware_profile() {
@@ -463,9 +537,12 @@ if (( INTERACTIVE )); then
   print_hardware_profile
   probe_engine_support
   echo
+  print_cascades
+  echo
 
   # --- STT ------------------------------------------------------------------
   echo "STT — speech-to-text engine + model:"
+  print_slot_reccos stt
   print_stt_groups numbered
   STT_TOTAL=$STT_N
   read -r -p "choose STT [default ${DEFAULT_WHISPER}]: " ans || ans=""
@@ -480,6 +557,7 @@ if (( INTERACTIVE )); then
 
   # --- LLM ------------------------------------------------------------------
   echo "LLM — Ollama model (best fits for this machine first):"
+  print_slot_reccos llm
   print_catalog_table numbered
   OLD_IFS="$IFS"; IFS=$'\n'; CATALOG_ROWS=( $(sorted_catalog_rows) ); IFS="$OLD_IFS"
   read -r -p "choose LLM [default ${LLM_MODEL:-qwen2.5:14b}]: " ans || ans=""
@@ -495,6 +573,7 @@ if (( INTERACTIVE )); then
 
   # --- TTS ------------------------------------------------------------------
   echo "TTS — text-to-speech engine + voice (all tiny next to the LLM):"
+  print_slot_reccos tts
   print_tts_groups numbered
   TTS_TOTAL=$TTS_N
   read -r -p "choose voice [default ${DEFAULT_VOICE}]: " ans || ans=""
@@ -684,7 +763,7 @@ uv run python scripts/print_models.py --bare 2>/dev/null \
 if (( VERBOSE )); then
   probe_engine_support
   echo
-  echo "💻 💻 💻 hardware profile 💻 💻 💻"
+  echo "doctor: hardware profile"
   print_hardware_profile
   if [[ -d models ]]; then
     echo "  ./models:"
@@ -701,10 +780,13 @@ if (( VERBOSE )); then
   done
 
   echo
+  echo "doctor: model catalogs"
+  echo
   echo "~ LLM catalog ~"
   echo
   echo "  Ollama (local server · registry: ollama.com/library)"
   print_catalog_table
+  echo "  (pick interactively with ./doctor.sh -i)"
   echo
 
   echo
