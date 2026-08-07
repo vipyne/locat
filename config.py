@@ -55,7 +55,12 @@ os.environ.setdefault("KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
 
 
 # --- Defaults for the runtime settings -------------------------------------
+DEFAULT_STT_ENGINE = "whisper_mlx"
+DEFAULT_TTS_ENGINE = "kokoro"
 DEFAULT_WHISPER_MODEL = "LARGE_V3_TURBO"
+DEFAULT_FASTER_WHISPER_MODEL = "DISTIL_MEDIUM_EN"
+DEFAULT_MOONSHINE_MODEL = "SMALL_STREAMING"
+DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 DEFAULT_LLM_MODEL = "qwen2.5:14b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_KOKORO_VOICE = "af_heart"
@@ -84,6 +89,27 @@ def _get(name: str, default: str) -> str:
     return os.getenv(name, "").strip() or default
 
 
+def stt_engine() -> str:
+    """Which STT engine to build (STT_ENGINE, default ``whisper_mlx``).
+
+    Options (see services.build_stt): ``whisper_mlx`` (Apple-GPU Whisper via MLX,
+    multilingual), ``faster_whisper`` (CPU Whisper via CTranslate2 — the
+    non-Apple-Silicon path), ``moonshine`` (tiny/fast CPU ONNX, English + a few
+    languages; needs ``uv sync --extra moonshine``).
+    """
+    return _get("STT_ENGINE", DEFAULT_STT_ENGINE)
+
+
+def tts_engine() -> str:
+    """Which TTS engine to build (TTS_ENGINE, default ``kokoro``).
+
+    Options (see services.build_tts): ``kokoro`` (ONNX, ~0.3 GB, 50+ voices),
+    ``piper`` (in-process piper-tts, small fast voices; needs
+    ``uv sync --extra piper``).
+    """
+    return _get("TTS_ENGINE", DEFAULT_TTS_ENGINE)
+
+
 def whisper_model() -> str:
     """``MLXModel`` member name for Whisper-MLX STT (default LARGE_V3_TURBO).
 
@@ -91,6 +117,47 @@ def whisper_model() -> str:
     downloaded (``scripts/prefetch_models.py`` reads the same var).
     """
     return _get("WHISPER_MODEL", DEFAULT_WHISPER_MODEL)
+
+
+def faster_whisper_model() -> str:
+    """``Model`` member name for faster-whisper STT (default DISTIL_MEDIUM_EN).
+
+    Only used when STT_ENGINE=faster_whisper. Members (pipecat
+    ``services.whisper.stt.Model``): TINY, BASE, SMALL, MEDIUM, LARGE,
+    LARGE_V3_TURBO, DISTIL_LARGE_V2, DISTIL_MEDIUM_EN (English-only).
+    Weights download from Hugging Face on first use (cached under HF_HOME).
+    """
+    return _get("FASTER_WHISPER_MODEL", DEFAULT_FASTER_WHISPER_MODEL)
+
+
+def moonshine_model() -> str:
+    """``Model`` member name for Moonshine STT (default SMALL_STREAMING).
+
+    Only used when STT_ENGINE=moonshine. Members (pipecat
+    ``services.moonshine.stt.Model``): TINY, BASE, TINY_STREAMING,
+    BASE_STREAMING, SMALL_STREAMING, MEDIUM_STREAMING. Weights download from
+    the Moonshine hub on first use.
+    """
+    return _get("MOONSHINE_MODEL", DEFAULT_MOONSHINE_MODEL)
+
+
+def piper_voice() -> str:
+    """Piper voice id (default ``en_US-lessac-medium``).
+
+    Only used when TTS_ENGINE=piper. Any id from the Piper voices collection
+    (huggingface.co/rhasspy/piper-voices) works; the ~60 MB voice model
+    downloads on first use into ``./models/piper/``.
+    """
+    return _get("PIPER_VOICE", DEFAULT_PIPER_VOICE)
+
+
+def piper_download_dir() -> str:
+    """Directory Piper voices download into (PIPER_DOWNLOAD_DIR).
+
+    Defaults to ./models/piper — keeping every checkpoint the bot needs inside
+    the repo-local ./models/ tree, like the other engines.
+    """
+    return _get("PIPER_DOWNLOAD_DIR", str(MODELS_DIR / "piper"))
 
 
 def llm_model() -> str:

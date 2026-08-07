@@ -31,18 +31,22 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.workers.runner import WorkerRunner
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
+
+from prompts.financial_advisor import SYSTEM_PROMPT
 
 # Reuse the exact offline builders + helpers from the CLI bot — one brain, two transports.
 from bot import (
     _configure_logging,
     _preflight_llm,
-    build_context,
-    build_context_aggregator,
-    build_llm,
-    build_stt,
-    build_tts,
     build_vad_processor,
 )
+
+# STT/LLM/TTS come from services.py (engine choice via STT_ENGINE / TTS_ENGINE).
+from services import build_llm, build_stt, build_tts
 
 load_dotenv(override=True)
 
@@ -55,17 +59,13 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport) -> None:
     """Assemble and run the pipeline for one connected browser client.
-
-    Identical pipeline to bot.py — the VADProcessor sits upstream of the segmented
-    Whisper STT (which transcribes on speech-stop); smart-turn comes from the user
-    aggregator's default strategies. Only the transport differs.
     """
     vad = build_vad_processor()
     stt = build_stt()
     llm = build_llm()
     tts = build_tts()
-    context = build_context()
-    user_aggregator, assistant_aggregator = build_context_aggregator(context)
+    context = LLMContext(messages=[{"role": "system", "content": SYSTEM_PROMPT}])
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -104,9 +104,6 @@ async def bot(runner_args: RunnerArguments) -> None:
 
 
 if __name__ == "__main__":
-    # Fail fast if the local LLM isn't ready (same preflight as bot.py), then hand off
-    # to the dev runner, which serves the prebuilt browser client + WebRTC signaling on
-    # http://localhost:7860 (open /client).
     _configure_logging()
     _preflight_llm(config.llm_model(), config.ollama_base_url())
 
