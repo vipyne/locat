@@ -69,7 +69,7 @@ integration (added 2026-08):
 
 1. `services.py`: new branch in `build_stt()`/`build_tts()` (lazy import,
    actionable error if the dep is missing).
-2. `config.py` + `.env.example`: engine value + model/voice var + defaults.
+2. `config.py` + `env.example`: engine value + model/voice var + defaults.
 3. `pyproject.toml`: optional extra if it needs a new package.
 4. `doctor.sh`: catalog rows/group (sizes, language notes, fit verdicts),
    `-i` picker resolution, gated `uv sync --extra` install, combo math.
