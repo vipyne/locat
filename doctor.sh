@@ -23,12 +23,45 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 [[ -f .env ]] && { set -a; source .env; set +a; }
 
+usage() {
+  cat <<'EOF'
+doctor.sh — report what this machine can handle for the offline voice bot.
+
+Usage:
+  ./doctor.sh              hardware check, STT/LLM/TTS cascades sized to this
+                           machine, and the currently configured models
+  ./doctor.sh -v           the above, plus a full hardware profile (CPU/GPU
+                           cores, est. memory bandwidth, disk) and per-slot
+                           model catalogs with fit verdicts:
+                             STT  Whisper-MLX, faster-whisper, Moonshine
+                             LLM  curated Ollama catalog, ranked by memory
+                                  footprint AND estimated speech latency
+                             TTS  Kokoro, Piper
+  ./doctor.sh -i           interactively pick an STT/LLM/TTS combo, get it
+                           approved against the hardware, then (each step
+                           gated on your confirmation) write it to .env,
+                           install missing engine support, and pull missing
+                           models
+
+Options:
+  -v, --verbose            full capability matrix + model catalogs
+  -i, --interactive        guided model picker (the only mode that writes)
+  -h, --help               this help
+
+Environment:
+  DOCTOR_RAM_GB=<n>        pretend the machine has <n> GB RAM (preview what
+                           doctor would say on a smaller Mac)
+
+Without -i, doctor never writes anything.
+EOF
+}
+
 VERBOSE=0
 INTERACTIVE=0
 case "${1:-}" in
   -v|--verbose)     VERBOSE=1 ;;
   -i|--interactive) INTERACTIVE=1 ;;
-  -h|--help)        grep '^#   ' "$0" | sed 's/^#   //'; exit 0 ;;
+  -h|--help)        usage; exit 0 ;;
   "")               ;;
   *) echo "doctor: unknown option '$1' (try ./doctor.sh -h)" >&2; exit 1 ;;
 esac
@@ -620,8 +653,9 @@ fi
 # =============================================================================
 echo "doctor: hardware check"
 pass "Apple Silicon Mac (${CHIP})"
+pass "${RAM_GB} GB unified memory"
 
-# --- RAM vs the configured LLM ----------------------------------------------
+# --- RAM vs the configured LLM (only speak up if something's off) ------------
 LLM_MODEL="${LLM_MODEL:-qwen2.5:14b}"
 
 # Best qwen2.5 tag for this much unified memory, leaving headroom for Whisper
@@ -630,29 +664,27 @@ if   (( RAM_GB >= 24 )); then RECOMMEND="qwen2.5:14b"
 elif (( RAM_GB >= 12 )); then RECOMMEND="qwen2.5:7b"
 else                          RECOMMEND="qwen2.5:3b"
 fi
-pass "${RAM_GB} GB unified memory — recommended LLM: ${RECOMMEND}"
 
 NEED="$(llm_needs_gb "$LLM_MODEL")"
 if (( NEED == 0 )); then
   warn "configured LLM '${LLM_MODEL}': size unknown — can't judge fit"
 elif (( NEED + 4 > RAM_GB )); then
   warn "configured LLM '${LLM_MODEL}' wants ~${NEED} GB + overhead — tight on ${RAM_GB} GB; consider ${RECOMMEND}"
-else
-  pass "configured LLM '${LLM_MODEL}' (~${NEED} GB) fits comfortably"
 fi
 
 echo
-uv run python scripts/print_models.py 2>/dev/null \
-  || warn "could not resolve models — run 'uv sync'"
+print_cascades
 
 echo
-print_cascades
+echo "doctor: current model configuration"
+uv run python scripts/print_models.py --bare 2>/dev/null \
+  || warn "could not resolve models — run 'uv sync'"
 
 # --- Verbose: full capability matrix ----------------------------------------
 if (( VERBOSE )); then
   probe_engine_support
   echo
-  echo "doctor: hardware profile"
+  echo "💻 💻 💻 hardware profile 💻 💻 💻"
   print_hardware_profile
   if [[ -d models ]]; then
     echo "  ./models:"
@@ -669,25 +701,19 @@ if (( VERBOSE )); then
   done
 
   echo
-  echo "doctor: LLM catalog"
-  echo "  [on ${RAM_GB} GB / ~${BW} GB/s · sizes are 4-bit quantized (\"q4\", Ollama's default) · best fits first · assumes ~2 GB STT/TTS + OS headroom]"
+  echo "~ LLM catalog ~"
   echo
   echo "  Ollama (local server · registry: ollama.com/library)"
   print_catalog_table
-  echo "  (pick interactively with ./doctor.sh -i)"
+  echo
 
   echo
-  echo "doctor: STT catalog"
-  echo "  [speech-to-text · engine chosen by STT_ENGINE, built in services.py · verdicts assume an LLM + OS alongside]"
+  echo "~ STT catalog ~"
   echo
   print_stt_groups plain
 
   echo
-  echo "doctor: TTS catalog"
-  echo "  [text-to-speech · engine chosen by TTS_ENGINE, built in services.py · tiny next to the LLM]"
+  echo "~ TTS catalog ~"
   echo
   print_tts_groups plain
 fi
-
-echo
-echo "doctor: ✅ good to go — ./start.sh   (try ./doctor.sh -i to choose different models)"

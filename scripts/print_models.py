@@ -46,10 +46,22 @@ def _tts_line() -> str:
 
 
 def main() -> None:
+    # --bare: just the three aligned lines, no "models:" prefix or blank lines
+    # (doctor.sh prints its own section header above them).
+    bare = "--bare" in sys.argv[1:]
+    lines = [
+        f"STT  {_stt_line()}",
+        f"LLM  {config.llm_model()} (Ollama @ {config.ollama_base_url()})",
+        f"TTS  {_tts_line()}",
+    ]
+    if bare:
+        for line in lines:
+            print(f"         {line}")
+        return
     print("")
-    print(f"models:  STT  {_stt_line()}")
-    print(f"         LLM  {config.llm_model()} (Ollama @ {config.ollama_base_url()})")
-    print(f"         TTS  {_tts_line()}")
+    print(f"models:  {lines[0]}")
+    for line in lines[1:]:
+        print(f"         {line}")
     print("")
 
 
