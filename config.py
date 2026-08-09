@@ -26,6 +26,7 @@ Two kinds of settings live here:
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -55,7 +56,10 @@ os.environ.setdefault("KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
 
 
 # --- Defaults for the runtime settings -------------------------------------
-DEFAULT_STT_ENGINE = "whisper_mlx"
+# Whisper-MLX needs an Apple-Silicon GPU (MLX ships no other macOS builds);
+# everywhere else the CPU path (faster-whisper) is the working default.
+IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
+DEFAULT_STT_ENGINE = "whisper_mlx" if IS_APPLE_SILICON else "faster_whisper"
 DEFAULT_TTS_ENGINE = "kokoro"
 DEFAULT_WHISPER_MODEL = "LARGE_V3_TURBO"
 DEFAULT_FASTER_WHISPER_MODEL = "DISTIL_MEDIUM_EN"
@@ -90,7 +94,8 @@ def _get(name: str, default: str) -> str:
 
 
 def stt_engine() -> str:
-    """Which STT engine to build (STT_ENGINE, default ``whisper_mlx``).
+    """Which STT engine to build (STT_ENGINE; default ``whisper_mlx`` on
+    Apple Silicon, ``faster_whisper`` elsewhere).
 
     Options (see services.build_stt): ``whisper_mlx`` (Apple-GPU Whisper via MLX,
     multilingual), ``faster_whisper`` (CPU Whisper via CTranslate2 — the

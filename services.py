@@ -39,6 +39,11 @@ def build_stt():
     engine = config.stt_engine()
 
     if engine == "whisper_mlx":
+        if not config.IS_APPLE_SILICON:
+            sys.exit(
+                "\n✖ STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
+                "  Set STT_ENGINE=faster_whisper in .env (or run ./doctor.sh -i)\n"
+            )
         from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 
         model = MLXModel[config.whisper_model()]

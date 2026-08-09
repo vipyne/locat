@@ -2,8 +2,10 @@
 #
 # doctor.sh — report what this machine can handle for the offline voice bot.
 #
-# Checks the hard requirement (Apple Silicon for the default Whisper-MLX STT),
-# compares total RAM against the configured LLM, and prints recommended
+# Runs on macOS (Apple Silicon or Intel) and Linux; on non-Apple-Silicon
+# machines the Apple-GPU STT (Whisper-MLX) is unavailable, so the CPU engines
+# (faster-whisper / Moonshine) become the defaults and recommendations.
+# Compares total RAM against the configured LLM and prints recommended
 # STT/LLM/TTS cascades sized to this machine. Verbose mode adds a full hardware
 # profile (CPU/GPU cores, estimated memory bandwidth, disk) and per-slot model
 # catalogs — every STT engine (Whisper-MLX, faster-whisper, Moonshine), the
@@ -50,7 +52,11 @@ Options:
 
 Environment:
   DOCTOR_RAM_GB=<n>        pretend the machine has <n> GB RAM (preview what
-                           doctor would say on a smaller Mac)
+                           doctor would say on a smaller machine)
+
+Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
+Silicon; elsewhere the CPU engines (faster-whisper/Moonshine) are the
+defaults. On Windows, run under WSL.
 
 Without -i, doctor never writes anything.
 EOF
@@ -158,41 +164,77 @@ llm_needs_gb() {
   esac
 }
 
-# --- Platform: Whisper-MLX (and MLX itself) require an Apple Silicon Mac ----
+# --- Platform ----------------------------------------------------------------
+# Whisper-MLX (Apple GPU) needs an Apple Silicon Mac; every other platform runs
+# the CPU engines (faster-whisper / Moonshine). Native Windows isn't supported
+# yet — under WSL this takes the Linux path.
 OS="$(uname -s)"; ARCH="$(uname -m)"
-if [[ "$OS" != "Darwin" || "$ARCH" != "arm64" ]]; then
-  echo "doctor: hardware check"
-  echo "  ❌ This is ${OS}/${ARCH} — the bot's default STT (Whisper-MLX) requires an"
-  echo "     Apple Silicon Mac; MLX does not run here. STT_ENGINE=faster_whisper"
-  echo "     (CPU) is the portable path, but this doctor only profiles macOS."
-  echo
-  echo "doctor: ❌ this machine cannot run the bot as configured"
-  exit 1
-fi
+MLX_OK=0
+# DOCTOR_PLATFORM overrides detection for previewing/testing another platform's
+# behavior, e.g.:  DOCTOR_PLATFORM=Darwin/x86_64 ./doctor.sh -v
+EFFECTIVE_PLATFORM="${DOCTOR_PLATFORM:-${OS}/${ARCH}}"
+case "$EFFECTIVE_PLATFORM" in
+  Darwin/arm64) PLATFORM="Apple Silicon Mac"; MLX_OK=1 ;;
+  Darwin/*)     PLATFORM="Intel Mac" ;;
+  Linux/*)      PLATFORM="Linux ${EFFECTIVE_PLATFORM#*/}" ;;
+  *)            echo "doctor: unsupported platform ${EFFECTIVE_PLATFORM} (on Windows, run this under WSL)" >&2
+                exit 1 ;;
+esac
 
 # --- Hardware profile (shared by every mode) --------------------------------
-CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Apple Silicon')"
+if [[ "$OS" == "Darwin" ]]; then
+  CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'unknown CPU')"
+  DETECTED_RAM=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+  GPU_CORES="$(system_profiler SPDisplaysDataType 2>/dev/null \
+    | awk -F': ' '/Total Number of Cores/{print $2; exit}' || :)"
+  CPU_CORES="$(sysctl -n hw.physicalcpu 2>/dev/null || :)"
+  CPU_PERF="$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || :)"
+  CPU_EFF="$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || :)"
+  OS_VER_LABEL="macOS"; OS_VER="$(sw_vers -productVersion 2>/dev/null || :)"
+else
+  CHIP="$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || echo 'unknown CPU')"
+  DETECTED_RAM=$(( $(awk '/^MemTotal/{print $2; exit}' /proc/meminfo 2>/dev/null || echo 0) / 1048576 ))
+  GPU_CORES=""
+  CPU_CORES="$(getconf _NPROCESSORS_ONLN 2>/dev/null || :)"
+  CPU_PERF=""; CPU_EFF=""
+  OS_VER_LABEL="kernel"; OS_VER="$(uname -r)"
+fi
 # DOCTOR_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
 # e.g.:  DOCTOR_RAM_GB=8 ./doctor.sh -v
-RAM_GB="${DOCTOR_RAM_GB:-$(( $(sysctl -n hw.memsize) / 1073741824 ))}"
-GPU_CORES="$(system_profiler SPDisplaysDataType 2>/dev/null \
-  | awk -F': ' '/Total Number of Cores/{print $2; exit}' || :)"
-CPU_CORES="$(sysctl -n hw.physicalcpu 2>/dev/null || :)"
-CPU_PERF="$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || :)"
-CPU_EFF="$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || :)"
-MACOS_VER="$(sw_vers -productVersion 2>/dev/null || :)"
+RAM_GB="${DOCTOR_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
 
-# Unified-memory bandwidth (GB/s) by chip family — decode speed of a q4 LLM is
-# bandwidth-bound, so this single number predicts tokens/sec.
+# Memory bandwidth (GB/s) — decode speed of a q4 LLM is bandwidth-bound, so
+# this single number predicts tokens/sec. Apple Silicon's unified memory is
+# well documented per chip; elsewhere assume dual-channel DDR-class bandwidth
+# (CPU decode is still bandwidth-bound, so the estimate stays meaningful).
 BW_EST=""  # non-empty when we fell back to a guess
-case "$CHIP" in
-  *M1\ Ultra*) BW=800 ;; *M1\ Max*) BW=400 ;; *M1\ Pro*) BW=200 ;; *M1*) BW=68  ;;
-  *M2\ Ultra*) BW=800 ;; *M2\ Max*) BW=400 ;; *M2\ Pro*) BW=200 ;; *M2*) BW=100 ;;
-  *M3\ Ultra*) BW=800 ;; *M3\ Max*) BW=400 ;; *M3\ Pro*) BW=150 ;; *M3*) BW=100 ;;
-                        *M4\ Max*) BW=546 ;; *M4\ Pro*) BW=273 ;; *M4*) BW=120 ;;
-  *) BW=100; BW_EST="unrecognized chip — assuming" ;;
-esac
+if (( MLX_OK )); then
+  case "$CHIP" in
+    *M1\ Ultra*) BW=800 ;; *M1\ Max*) BW=400 ;; *M1\ Pro*) BW=200 ;; *M1*) BW=68  ;;
+    *M2\ Ultra*) BW=800 ;; *M2\ Max*) BW=400 ;; *M2\ Pro*) BW=200 ;; *M2*) BW=100 ;;
+    *M3\ Ultra*) BW=800 ;; *M3\ Max*) BW=400 ;; *M3\ Pro*) BW=150 ;; *M3*) BW=100 ;;
+                          *M4\ Max*) BW=546 ;; *M4\ Pro*) BW=273 ;; *M4*) BW=120 ;;
+    *) BW=100; BW_EST="unrecognized chip — assuming" ;;
+  esac
+else
+  BW=40; BW_EST="non-unified memory — assuming"
+fi
+
+# The -i default STT pick (menu numbers run continuously across engine groups):
+# Whisper-MLX LARGE_V3_TURBO on Apple Silicon, else faster-whisper's default.
+if (( MLX_OK )); then
+  DEFAULT_STT_NAME="$DEFAULT_WHISPER"; DEFAULT_STT_PICK=0
+  _i=0; for _e in "${WHISPER_TABLE[@]}"; do _i=$((_i + 1))
+    [[ "${_e%%|*}" == "$DEFAULT_WHISPER" ]] && DEFAULT_STT_PICK=$_i
+  done
+else
+  DEFAULT_STT_NAME="DISTIL_MEDIUM_EN"; DEFAULT_STT_PICK=0
+  _i=${#WHISPER_TABLE[@]}; for _e in "${FASTER_WHISPER_TABLE[@]}"; do _i=$((_i + 1))
+    [[ "${_e%%|*}" == "$DEFAULT_STT_NAME" ]] && DEFAULT_STT_PICK=$_i
+  done
+fi
+unset _i _e
 
 # Rough decode speed for a q4 model of $1 GB on this chip's bandwidth.
 est_tok_s() { echo $(( BW / ( $1 > 0 ? $1 : 1 ) )); }
@@ -287,19 +329,29 @@ CAS_NAMES=(); CAS_ROWS=(); CAS_WNAMES=(); CAS_WGBS=()
 
 compute_cascades() {
   (( ${#CAS_NAMES[@]} )) && return 0  # already computed
-  local rows quality balanced snappy q_stt
+  local rows quality balanced snappy bal_stt bal_gb q_stt q_gb sn_stt sn_gb
   rows="$(sorted_catalog_rows | awk -F'|' '$1==0 && $7 !~ /thinking|reasoning/')"
   [[ -z "$rows" ]] && return 0
   quality="$(echo "$rows" | head -1)"                            # largest that fits ✅
   balanced="$(echo "$rows" | awk -F'|' '$4>=25{print; exit}')"   # largest at ≥25 tok/s
   snappy="$(echo "$rows" | awk -F'|' '$4>=100{print; exit}')"    # largest at ≥100 tok/s
 
-  q_stt="LARGE_V3_TURBO"; (( RAM_GB >= 16 )) && q_stt="LARGE_V3"
-  add_cascade "balanced"     "$balanced" "LARGE_V3_TURBO"    2
+  if (( MLX_OK )); then
+    bal_stt="LARGE_V3_TURBO"; bal_gb=2
+    q_stt="LARGE_V3_TURBO"; q_gb=2
+    (( RAM_GB >= 16 )) && { q_stt="LARGE_V3"; q_gb=3; }
+    sn_stt="LARGE_V3_TURBO_Q4"; sn_gb=1
+  else
+    # CPU transcription: the distilled models keep latency voice-usable.
+    bal_stt="DISTIL_MEDIUM_EN"; bal_gb=1
+    q_stt="DISTIL_LARGE_V2";    q_gb=2
+    sn_stt="BASE";              sn_gb=1
+  fi
+  add_cascade "balanced"     "$balanced" "$bal_stt" "$bal_gb"
   [[ "$(row_tag "$quality")" != "$(row_tag "$balanced")" ]] \
-    && add_cascade "best quality" "$quality" "$q_stt" "$( [[ $q_stt == LARGE_V3 ]] && echo 3 || echo 2 )"
+    && add_cascade "best quality" "$quality" "$q_stt" "$q_gb"
   [[ "$(row_tag "$snappy")" != "$(row_tag "$balanced")" ]] \
-    && add_cascade "snappiest"    "$snappy"  "LARGE_V3_TURBO_Q4" 1
+    && add_cascade "snappiest"    "$snappy"  "$sn_stt" "$sn_gb"
   return 0
 }
 
@@ -310,12 +362,24 @@ add_cascade() {  # tier-name  catalog-row  whisper-name  whisper-int-gb
 
 row_tag() { echo "${1:-}" | cut -d'|' -f3; }
 
-whisper_lookup() {  # $1 = Whisper-MLX name → sets WNUM (menu number) + WDISP (~GB)
+whisper_lookup() {  # $1 = STT model name → sets WNUM (menu number) + WDISP (~GB)
+  # Cascades recommend Whisper-MLX models on Apple Silicon and faster-whisper
+  # models elsewhere; menu numbers continue across the engine groups, so the
+  # faster-whisper search starts past the Whisper-MLX rows. Both tables reuse
+  # names (TINY, LARGE_V3_TURBO, …) — the platform picks which table applies.
   local entry i=0; WNUM=0; WDISP=""
-  for entry in "${WHISPER_TABLE[@]}"; do
-    i=$((i + 1))
-    [[ "${entry%%|*}" == "$1" ]] && { WNUM=$i; WDISP="$(echo "$entry" | cut -d'|' -f2)"; }
-  done
+  (( MLX_OK )) || i=${#WHISPER_TABLE[@]}
+  if (( MLX_OK )); then
+    for entry in "${WHISPER_TABLE[@]}"; do
+      i=$((i + 1))
+      [[ "${entry%%|*}" == "$1" ]] && { WNUM=$i; WDISP="$(echo "$entry" | cut -d'|' -f2)"; }
+    done
+  else
+    for entry in "${FASTER_WHISPER_TABLE[@]}"; do
+      i=$((i + 1))
+      [[ "${entry%%|*}" == "$1" ]] && { WNUM=$i; WDISP="$(echo "$entry" | cut -d'|' -f2)"; }
+    done
+  fi
   return 0
 }
 
@@ -388,17 +452,18 @@ print_slot_reccos() {  # $1 = stt|llm|tts — reprint one slot's recommendations
 }
 
 print_hardware_profile() {
-  echo "  chip:       ${CHIP}"
-  echo "  macOS:      ${MACOS_VER:-unknown}"
-  echo "  memory:     ${RAM_GB} GB unified"
+  printf "  %-12s%s\n" "chip:" "${CHIP}"
+  printf "  %-12s%s\n" "${OS_VER_LABEL}:" "${OS_VER:-unknown}"
+  printf "  %-12s%s\n" "memory:" "${RAM_GB} GB$( (( MLX_OK )) && echo ' unified' )"
   if [[ -n "$CPU_PERF" && -n "$CPU_EFF" ]]; then
-    echo "  CPU cores:  ${CPU_CORES:-?} (${CPU_PERF} performance + ${CPU_EFF} efficiency)"
+    printf "  %-12s%s\n" "CPU cores:" "${CPU_CORES:-?} (${CPU_PERF} performance + ${CPU_EFF} efficiency)"
   else
-    echo "  CPU cores:  ${CPU_CORES:-unknown}"
+    printf "  %-12s%s\n" "CPU cores:" "${CPU_CORES:-unknown}"
   fi
-  echo "  GPU cores:  ${GPU_CORES:-unknown}"
-  echo "  memory bw:  ~${BW} GB/s ${BW_EST:+(${BW_EST} baseline) }(est. — governs LLM tokens/sec)"
-  echo "  free disk:  ${FREE_DISK} available on this volume"
+  [[ -n "$GPU_CORES" || "$OS" == "Darwin" ]] \
+    && printf "  %-12s%s\n" "GPU cores:" "${GPU_CORES:-unknown}"
+  printf "  %-12s%s\n" "memory bw:" "~${BW} GB/s ${BW_EST:+(${BW_EST} baseline) }(est. — governs LLM tokens/sec)"
+  printf "  %-12s%s\n" "free disk:" "${FREE_DISK} available on this volume"
 }
 
 # Fit verdict for an STT/TTS model of $1 (rounded-up) GB. Same headroom idea as
@@ -418,8 +483,12 @@ print_whisper_mlx_rows() {  # $1 = "numbered"|"plain"; increments STT_N
   for entry in "${WHISPER_TABLE[@]}"; do
     STT_N=$((STT_N + 1))
     name="$(echo "$entry" | cut -d'|' -f1)"; disp="$(echo "$entry" | cut -d'|' -f2)"
-    verdict="$(stt_verdict "$(echo "$entry" | cut -d'|' -f3)")"
-    mark=""; [[ "$name" == "$DEFAULT_WHISPER" ]] && mark="(default)"
+    if (( MLX_OK )); then
+      verdict="$(stt_verdict "$(echo "$entry" | cut -d'|' -f3)")"
+    else
+      verdict="❌ needs Apple Silicon"
+    fi
+    mark=""; [[ "$name" == "$DEFAULT_WHISPER" ]] && (( MLX_OK )) && mark="(default)"
     inst=""; hf_model_installed "mlx-community--$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
     if [[ "$1" == "numbered" ]]; then
       printf "  %3d) %-18s ~%s GB  %-12s %-10s %s\n" "$STT_N" "$name" "$disp" "$verdict" "$mark" "$inst"
@@ -439,6 +508,7 @@ print_faster_whisper_rows() {
     # even when they fit in RAM — a latency problem, not a memory one.
     case "$name" in MEDIUM|LARGE) [[ "$verdict" == "✅ good" ]] && verdict="⚠️  slow on CPU" ;; esac
     note="$(echo "$entry" | cut -d'|' -f5)"
+    [[ "$name" == "$DEFAULT_STT_NAME" ]] && (( ! MLX_OK )) && note="${note} (default)"
     inst=""; hf_model_installed "$(echo "$entry" | cut -d'|' -f4)" && inst="(installed)"
     if [[ "$1" == "numbered" ]]; then
       printf "  %3d) %-18s ~%s GB  %-16s %-28s %s\n" "$STT_N" "$name" "$disp" "$verdict" "$note" "$inst"
@@ -468,7 +538,7 @@ piper_hint()     { (( PIPER_OK ))     || echo " · needs: uv sync --extra piper"
 
 print_stt_groups() {  # $1 = "numbered"|"plain"
   STT_N=0
-  echo "  Whisper-MLX (Apple GPU · multilingual)"
+  echo "  Whisper-MLX (Apple GPU · multilingual$( (( MLX_OK )) || echo ' · not on this machine' ))"
   print_whisper_mlx_rows "$1"
   echo "  faster-whisper (CPU · the non-Apple-Silicon path)"
   print_faster_whisper_rows "$1"
@@ -506,6 +576,10 @@ resolve_stt_pick() {
   local n=$1 entry
   local w=${#WHISPER_TABLE[@]} f=${#FASTER_WHISPER_TABLE[@]}
   if (( n <= w )); then
+    if (( ! MLX_OK )); then
+      echo "doctor: Whisper-MLX needs an Apple Silicon Mac — pick a faster-whisper or Moonshine model" >&2
+      exit 1
+    fi
     entry="${WHISPER_TABLE[$((n - 1))]}"
     CHOSEN_STT_ENGINE="whisper_mlx"
     CHOSEN_STT_HFDIR="mlx-community--$(echo "$entry" | cut -d'|' -f4)"
@@ -545,9 +619,9 @@ if (( INTERACTIVE )); then
   print_slot_reccos stt
   print_stt_groups numbered
   STT_TOTAL=$STT_N
-  read -r -p "choose STT [default ${DEFAULT_WHISPER}]: " ans || ans=""
+  read -r -p "choose STT [default ${DEFAULT_STT_NAME}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    resolve_stt_pick 4  # LARGE_V3_TURBO's position in WHISPER_TABLE
+    resolve_stt_pick "$DEFAULT_STT_PICK"
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= STT_TOTAL )); then
     resolve_stt_pick "$ans"
   else
@@ -731,8 +805,13 @@ fi
 # Default / verbose modes (read-only).
 # =============================================================================
 echo "doctor: hardware check"
-pass "Apple Silicon Mac (${CHIP})"
-pass "${RAM_GB} GB unified memory"
+if (( MLX_OK )); then
+  pass "Apple Silicon Mac (${CHIP})"
+  pass "${RAM_GB} GB unified memory"
+else
+  warn "${PLATFORM} (${CHIP}) — no Apple-GPU STT here; CPU engines apply (faster-whisper/Moonshine)"
+  pass "${RAM_GB} GB memory"
+fi
 
 # --- RAM vs the configured LLM (only speak up if something's off) ------------
 LLM_MODEL="${LLM_MODEL:-qwen2.5:14b}"

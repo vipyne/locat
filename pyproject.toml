@@ -7,7 +7,10 @@ dependencies = [
     "moq-rs>=0.3.2,<0.4.0",
     "num2words>=0.5.14",
     "pipecat-ai-prebuilt>=1.0.5",
-    "pipecat-ai[kokoro,mlx-whisper,moq,silero,webrtc,whisper]>=1.7.0",
+    "pipecat-ai[kokoro,moq,silero,webrtc,whisper]>=1.7.0",
+    # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
+    # platforms default to faster-whisper (CPU) instead (see services.py).
+    "pipecat-ai[mlx-whisper]>=1.7.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "pyaudio>=0.2.14",
     "python-dotenv>=1.2.2",
     "textual>=8.2.8",
@@ -20,3 +23,13 @@ dependencies = [
 [project.optional-dependencies]
 moonshine = ["pipecat-ai[moonshine]"]
 piper = ["pipecat-ai[piper]"]
+
+[tool.uv]
+# pipecat pins onnxruntime ~=1.24.3, but onnxruntime 1.24 dropped Intel-mac
+# wheels. 1.23 is API-compatible for everything that runs on it here (Silero
+# VAD, smart-turn, Kokoro, Moonshine), so Intel macs get 1.23 while every
+# other platform keeps pipecat's intended pin.
+override-dependencies = [
+    "onnxruntime>=1.24.3,<1.25; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "onnxruntime>=1.23,<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]

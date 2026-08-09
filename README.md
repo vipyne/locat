@@ -21,7 +21,9 @@ solve a problem like echo cancellation?"
 
 ## Requirements
 
-- **Apple Silicon Mac.** Whisper-MLX uses Apple's MLX framework.
+- **Apple Silicon Mac recommended** — Whisper-MLX (the default STT) uses Apple's
+  MLX framework and only runs there. Intel Macs and Linux work too: they default
+  to CPU STT (`faster_whisper`) automatically. Windows: not yet (WSL works).
 - ~15 GB free disk for the models
 - Python **3.12** is pinned as 3.14 is too new for the ML wheels.
 - **[uv](https://docs.astral.sh/uv/)** — Python package manager.
@@ -223,7 +225,7 @@ the copy-paste template.
 |---|---|---|
 | `LLM_MODEL` | `qwen2.5:14b` | Ollama model tag. Same string `run_ollama.sh` pulls and the bot serves. Smaller/faster: `qwen2.5:7b`. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible Ollama endpoint (note the trailing `/v1`). |
-| `STT_ENGINE` | `whisper_mlx` | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). |
+| `STT_ENGINE` | `whisper_mlx`* | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). *Default is `faster_whisper` on non-Apple-Silicon machines. |
 | `WHISPER_MODEL` | `LARGE_V3_TURBO` | `MLXModel` member: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`. Must match what you prefetched. |
 | `FASTER_WHISPER_MODEL` | `DISTIL_MEDIUM_EN` | faster-whisper model (when `STT_ENGINE=faster_whisper`); downloads on first use. |
 | `MOONSHINE_MODEL` | `SMALL_STREAMING` | Moonshine model (when `STT_ENGINE=moonshine`); downloads on first use. |
