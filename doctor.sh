@@ -835,8 +835,18 @@ print_cascades
 
 echo
 echo "doctor: current model configuration"
-uv run python scripts/print_models.py --bare 2>/dev/null \
-  || warn "could not resolve models — run 'uv sync'"
+# `uv run` implicitly syncs, so this is where a broken dependency tree first
+# surfaces. Show the real error instead of swallowing it — "run 'uv sync'" is
+# useless advice when uv sync is itself what's failing (e.g. a package with no
+# wheel for this arch falling back to a source build).
+MODELS_ERR="$(mktemp)"
+if ! uv run python scripts/print_models.py --bare 2>"$MODELS_ERR"; then
+  warn "could not resolve models — 'uv run' failed:"
+  tail -n 15 "$MODELS_ERR" | sed 's/^/         /'
+  echo "         if a package is building from source, check for an arch wheel gap:"
+  echo "           python3 scripts/check_wheels.py"
+fi
+rm -f "$MODELS_ERR"
 
 # --- Verbose: full capability matrix ----------------------------------------
 if (( VERBOSE )); then

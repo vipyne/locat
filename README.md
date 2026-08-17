@@ -26,6 +26,11 @@ solve a problem like echo cancellation?"
   to CPU STT (`faster_whisper`) automatically. Windows: not yet (WSL works).
 - ~15 GB free disk for the models
 - Python **3.12** is pinned as 3.14 is too new for the ML wheels.
+- **Everything installs from a prebuilt wheel** — no compiler needed. Several
+  deps (onnxruntime, numba/llvmlite, cryptography) have already dropped Intel-mac
+  wheels, so `pyproject.toml` pins those back to their last Intel-mac release
+  under `[tool.uv]`. If `uv sync` ever starts building a package from source,
+  run `python3 scripts/check_wheels.py` to see which platform lost a wheel.
 - **[uv](https://docs.astral.sh/uv/)** — Python package manager.
 - **[Ollama](https://ollama.com/)** — serves the local LLM.
 - **PortAudio** OR **any web browser** — PyAudio's native dependency / audio handling.
