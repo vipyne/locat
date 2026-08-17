@@ -25,7 +25,12 @@ import time
 try:
     import pyaudio
 except ImportError:
-    sys.exit("pyaudio not installed. Run: uv sync  (or: uv add pyaudio)")
+    sys.exit(
+        "pyaudio not installed — it is an opt-in extra (needs PortAudio).\n"
+        "  macOS:  brew install portaudio\n"
+        "  Debian: sudo apt install portaudio19-dev\n"
+        "  then:   uv sync --extra local-audio"
+    )
 
 RATE = 16000
 CHANNELS = 1

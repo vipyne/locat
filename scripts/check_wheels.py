@@ -44,10 +44,14 @@ PLATFORMS = {
     "windows": ("x86_64-pc-windows-msvc", ("win_amd64",), {}),
 }
 
-# Pure-Python sdists (build anywhere, no compiler) and packages we knowingly
-# build from source. pyaudio needs portaudio headers, which doctor.sh checks
-# for separately.
-ALLOWED_SOURCE_BUILDS = {"pyaudio", "docopt"}
+# Pure-Python sdists: no compiler needed, so they install fine anywhere.
+#
+# pyaudio is deliberately NOT listed — it is the one dependency that genuinely
+# needs a C toolchain (PortAudio headers; it ships Windows wheels only), which is
+# exactly why it lives in the `local-audio` extra rather than the base install.
+# This script audits the base install, so it should never see pyaudio at all; if
+# it ever shows up here, something has pulled it back into the default sync.
+ALLOWED_SOURCE_BUILDS = {"docopt"}
 
 PYTHON_VERSION = "3.12"
 

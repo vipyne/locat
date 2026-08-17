@@ -911,12 +911,14 @@ dependencies = [
     { name = "pipecat-ai", extra = ["kokoro", "moq", "webrtc", "whisper"] },
     { name = "pipecat-ai", extra = ["mlx-whisper"], marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "pipecat-ai-prebuilt" },
-    { name = "pyaudio" },
     { name = "python-dotenv" },
     { name = "textual" },
 ]
 
 [package.optional-dependencies]
+local-audio = [
+    { name = "pyaudio" },
+]
 moonshine = [
     { name = "pipecat-ai", extra = ["moonshine"] },
 ]
@@ -934,11 +936,11 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["moonshine"], marker = "extra == 'moonshine'" },
     { name = "pipecat-ai", extras = ["piper"], marker = "extra == 'piper'" },
     { name = "pipecat-ai-prebuilt", specifier = ">=1.0.5" },
-    { name = "pyaudio", specifier = ">=0.2.14" },
+    { name = "pyaudio", marker = "extra == 'local-audio'", specifier = ">=0.2.14" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "textual", specifier = ">=8.2.8" },
 ]
-provides-extras = ["moonshine", "piper"]
+provides-extras = ["moonshine", "piper", "local-audio"]
 
 [[package]]
 name = "loguru"

@@ -21,6 +21,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from typing import TYPE_CHECKING
 
 # Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
 # Kokoro cache paths) at import time, and Hugging Face freezes its cache root when
@@ -41,10 +42,9 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.workers.runner import WorkerRunner
-from pipecat.transports.local.audio import (
-    LocalAudioTransport,
-    LocalAudioTransportParams,
-)
+
+if TYPE_CHECKING:  # import for typing only — see build_transport() for why
+    from pipecat.transports.local.audio import LocalAudioTransport
 
 from prompts.financial_advisor import SYSTEM_PROMPT
 
@@ -54,12 +54,37 @@ from prompts.financial_advisor import SYSTEM_PROMPT
 from services import build_llm, build_stt, build_tts  # noqa: F401  (re-exported)
 
 
-def build_transport() -> LocalAudioTransport:
+def build_transport() -> "LocalAudioTransport":
     """Build the local audio transport (mic in + speaker out).
 
     - Device indices come from config (INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX;
       default: the system default input/output devices).
+
+    PyAudio is imported here rather than at module scope on purpose. It is an
+    opt-in extra (`local-audio`) because it has no macOS/Linux wheels and must
+    compile against PortAudio — and bot_web.py / bot_moq.py import this module
+    for its builders while getting audio from the browser instead. A top-level
+    import would break those front-ends on machines without PortAudio, and would
+    also give this module the import-time side effect its docstring disclaims.
     """
+    try:
+        from pipecat.transports.local.audio import (
+            LocalAudioTransport,
+            LocalAudioTransportParams,
+        )
+    except ImportError as e:
+        # Pipecat logs its own hint here pointing at `pipecat-ai[local]`, which
+        # is not how this repo installs it — override with the real command.
+        sys.exit(
+            f"bot.py needs PyAudio for mic/speaker access ({e}).\n"
+            "  macOS:  brew install portaudio\n"
+            "  Debian: sudo apt install portaudio19-dev\n"
+            "  then:   uv sync --extra local-audio\n"
+            "\n"
+            "Or skip it and use a browser front-end, which needs no PortAudio and\n"
+            "gives you echo cancellation for free:  ./start.sh  (or: ./start.sh -t moq)"
+        )
+
     params = LocalAudioTransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,

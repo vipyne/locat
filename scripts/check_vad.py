@@ -27,7 +27,12 @@ import numpy as np
 try:
     import pyaudio
 except ImportError:
-    sys.exit("pyaudio not installed. Run: uv sync")
+    sys.exit(
+        "pyaudio not installed — it is an opt-in extra (needs PortAudio).\n"
+        "  macOS:  brew install portaudio\n"
+        "  Debian: sudo apt install portaudio19-dev\n"
+        "  then:   uv sync --extra local-audio"
+    )
 
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.audio.vad.silero import SileroVADAnalyzer

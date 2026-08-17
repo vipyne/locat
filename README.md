@@ -26,14 +26,18 @@ solve a problem like echo cancellation?"
   to CPU STT (`faster_whisper`) automatically. Windows: not yet (WSL works).
 - ~15 GB free disk for the models
 - Python **3.12** is pinned as 3.14 is too new for the ML wheels.
-- **Everything installs from a prebuilt wheel** — no compiler needed. Several
-  deps (onnxruntime, numba/llvmlite, cryptography) have already dropped Intel-mac
-  wheels, so `pyproject.toml` pins those back to their last Intel-mac release
-  under `[tool.uv]`. If `uv sync` ever starts building a package from source,
-  run `python3 scripts/check_wheels.py` to see which platform lost a wheel.
+- **A plain `uv sync` needs no compiler** — everything in the base install comes
+  from a prebuilt wheel. Several deps (onnxruntime, numba/llvmlite, cryptography)
+  have already dropped Intel-mac wheels, so `pyproject.toml` pins those back to
+  their last Intel-mac release under `[tool.uv]`. If `uv sync` ever starts
+  building something from source, run `python3 scripts/check_wheels.py` to see
+  which platform lost a wheel.
+  The one exception is PyAudio, which has no macOS/Linux wheels — so it is an
+  opt-in extra (`--extra local-audio`) needed only by the headphones front-end.
 - **[uv](https://docs.astral.sh/uv/)** — Python package manager.
 - **[Ollama](https://ollama.com/)** — serves the local LLM.
-- **PortAudio** OR **any web browser** — PyAudio's native dependency / audio handling.
+- **PortAudio** OR **any web browser** — PyAudio's native dependency / audio
+  handling. Browser front-ends need neither PortAudio nor a compiler.
 
 ---
 
@@ -67,8 +71,8 @@ Or...
 
 ```bash
 git clone git@github.com:vipyne/locat.git && cd locat
-brew install portaudio
-uv sync
+brew install portaudio            # Debian: sudo apt install portaudio19-dev
+uv sync --extra local-audio       # the extra adds PyAudio (needs PortAudio)
 bash scripts/run_ollama.sh
 uv run python scripts/prefetch_models.py
 ```
@@ -85,9 +89,22 @@ Have a conversation.
 
 ```bash
 git clone git@github.com:vipyne/locat.git && cd locat
-brew install portaudio        # PyAudio needs this; Not necessary if using browser
 uv sync                       # creates .venv and installs everything (Python 3.12)
 ```
+
+That is all you need for the browser front-ends. For the headphones front-end
+(`bot.py`), PyAudio has to compile against PortAudio, so install it and opt into
+the extra:
+
+```bash
+brew install portaudio                # Debian: sudo apt install portaudio19-dev
+uv sync --extra local-audio
+```
+
+> [!NOTE]
+> `uv sync` uninstalls any extra you don't pass, so keep listing the ones you
+> want: `uv sync --extra local-audio --extra piper`. (`./doctor.sh -i` preserves
+> whatever is already installed.)
 
 Optionally copy the config template (everything is optional — the bot runs with an
 empty or absent `.env`):

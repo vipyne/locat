@@ -276,14 +276,18 @@ piper_voice_installed() {  # $1 = piper voice id
   [[ -f "${PIPER_DOWNLOAD_DIR:-$REPO/models/piper}/$1.onnx" ]]
 }
 
-# Optional-engine support: MOONSHINE_OK / PIPER_OK = 1 when the extra's package
-# is importable in the venv. One uv invocation, spec lookup only (no imports).
-MOONSHINE_OK=0; PIPER_OK=0
+# Optional-extra support: *_OK = 1 when the extra's package is importable in the
+# venv. One uv invocation, spec lookup only (no imports). LOCAL_AUDIO_OK covers
+# the `local-audio` extra (pyaudio, needed only by bot.py); it is tracked here
+# because `uv sync` uninstalls any extra not passed on the command line, so the
+# -i flow has to re-list it to avoid silently removing it.
+MOONSHINE_OK=0; PIPER_OK=0; LOCAL_AUDIO_OK=0
 probe_engine_support() {
   local out
   out="$(uv run python -c 'import importlib.util as u
-print(int(u.find_spec("moonshine_voice") is not None), int(u.find_spec("piper") is not None))' 2>/dev/null || echo "0 0")"
-  MOONSHINE_OK="${out%% *}"; PIPER_OK="${out##* }"
+for m in ("moonshine_voice", "piper", "pyaudio"):
+    print(int(u.find_spec(m) is not None), end=" ")' 2>/dev/null || echo "0 0 0")"
+  read -r MOONSHINE_OK PIPER_OK LOCAL_AUDIO_OK <<<"$out"
 }
 
 # Catalog rows, best-fitting first: "rank|gb|tag|tok/s|verdict|installed|note"
@@ -740,6 +744,9 @@ if (( INTERACTIVE )); then
     EXTRA_FLAGS=""
     (( MOONSHINE_OK || NEED_MOONSHINE )) && EXTRA_FLAGS="$EXTRA_FLAGS --extra moonshine"
     (( PIPER_OK || NEED_PIPER ))         && EXTRA_FLAGS="$EXTRA_FLAGS --extra piper"
+    # Not an engine, but same rule: re-list it or this sync uninstalls pyaudio
+    # and bot.py stops working.
+    (( LOCAL_AUDIO_OK ))                 && EXTRA_FLAGS="$EXTRA_FLAGS --extra local-audio"
     echo
     (( NEED_MOONSHINE )) && echo "  missing: Moonshine engine support (python package)"
     (( NEED_PIPER ))     && echo "  missing: Piper engine support (python package)"

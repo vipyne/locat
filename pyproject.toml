@@ -11,7 +11,6 @@ dependencies = [
     # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
     # platforms default to faster-whisper (CPU) instead (see services.py).
     "pipecat-ai[mlx-whisper]>=1.7.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "pyaudio>=0.2.14",
     "python-dotenv>=1.2.2",
     "textual>=8.2.8",
 ]
@@ -23,6 +22,14 @@ dependencies = [
 [project.optional-dependencies]
 moonshine = ["pipecat-ai[moonshine]"]
 piper = ["pipecat-ai[piper]"]
+# bot.py (LocalAudioTransport) only. PyAudio ships wheels for Windows *only*, so
+# on macOS/Linux it compiles against PortAudio — the one dependency here that
+# needs a C toolchain. Keeping it out of the base install means a bare
+# `uv sync` works on any machine, and the browser front-ends (bot_web.py,
+# bot_moq.py) run without it; they get echo cancellation from the browser
+# anyway. See README "Requirements".
+#   brew install portaudio && uv sync --extra local-audio
+local-audio = ["pyaudio>=0.2.14"]
 
 [tool.uv]
 # pipecat pins onnxruntime ~=1.24.3, but onnxruntime 1.24 dropped Intel-mac
