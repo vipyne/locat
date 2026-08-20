@@ -2,7 +2,7 @@
 #
 # start.sh — one command to run the fully-offline voice bot on your transport
 # of choice. Ensures the repo-local Ollama server is up (models in
-# ./models/ollama) with the LLM pulled, prints the exact models about to be
+# $LOCAT_MODEL_DIR/ollama) with the LLM pulled, prints the exact models about to be
 # used, then launches the bot. Ollama is left running in the background so
 # subsequent starts are instant; stop it with ./stop.sh.
 #
@@ -11,12 +11,17 @@
 #   ./start.sh -t moq              # MoQ transport — browser, lowest latency
 #   ./start.sh -t headphones       # local audio hardware (use headphones! 🎧)
 #   ./start.sh -h                  # show this help
-#   LLM_MODEL=llama3 ./start.sh    # use a different local model
+#   LOCAT_LLM_MODEL=llama3 ./start.sh    # use a different local model
 #
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 [[ -f .env ]] && { set -a; source .env; set +a; }
+# .env may set LOCAT_MODEL_DIR — resolve it so the paths this script reports are
+# the ones run_ollama.sh and the bot actually use.
+LOCAT_REPO_ROOT="$REPO"
+# shellcheck source=scripts/model_dir.sh
+. "$REPO/scripts/model_dir.sh"
 
 usage() { grep '^#   ' "$0" | sed 's/^#   //'; }
 
@@ -36,22 +41,22 @@ esac
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 BASE="http://${OLLAMA_HOST}"
-LLM_MODEL="${LLM_MODEL:-qwen2.5:14b}"
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
 OLLAMA_LOG="$REPO/ollama.log"
-WEB_PORT="${WEB_PORT:-7860}"
+LOCAT_WEB_PORT="${LOCAT_WEB_PORT:-7860}"
 
 server_up()   { curl -sf --max-time 2 "$BASE/api/tags" -o /dev/null 2>/dev/null; }
-model_ready() { curl -sf --max-time 3 "$BASE/api/tags" 2>/dev/null | grep -q "\"${LLM_MODEL}"; }
+model_ready() { curl -sf --max-time 3 "$BASE/api/tags" 2>/dev/null | grep -q "\"${LOCAT_LLM_MODEL}"; }
 
 if server_up && model_ready; then
-  echo "start: Ollama already serving ${LLM_MODEL} at ${BASE}"
+  echo "start: Ollama already serving ${LOCAT_LLM_MODEL} at ${BASE}"
 else
-  echo "start: bringing up repo-local Ollama (store → ./models/ollama; log → ollama.log)"
+  echo "start: bringing up Ollama (store → ${OLLAMA_MODELS}; log → ollama.log)"
   # run_ollama.sh starts 'ollama serve' (if needed) + pulls the model, then blocks.
   nohup ./scripts/run_ollama.sh >"$OLLAMA_LOG" 2>&1 &
-  echo "start: waiting for ${LLM_MODEL} (first pull can take a few minutes)..."
+  echo "start: waiting for ${LOCAT_LLM_MODEL} (first pull can take a few minutes)..."
   for _ in $(seq 1 900); do model_ready && break; sleep 1; done
-  model_ready || { echo "start: ${LLM_MODEL} not ready — see $OLLAMA_LOG" >&2; exit 1; }
+  model_ready || { echo "start: ${LOCAT_LLM_MODEL} not ready — see $OLLAMA_LOG" >&2; exit 1; }
 fi
 
 uv run python scripts/print_models.py \
@@ -59,13 +64,13 @@ uv run python scripts/print_models.py \
 
 case "$TRANSPORT" in
   moq)
-    CMD=(uv run python bot_moq.py --host localhost --port "${WEB_PORT}")
+    CMD=(uv run python bot_moq.py --host localhost --port "${LOCAT_WEB_PORT}")
     echo "start: Ollama ready."
-    echo "       ▶ Open  http://localhost:${WEB_PORT}  — choose 'Media over QUIC' in the"
+    echo "       ▶ Open  http://localhost:${LOCAT_WEB_PORT}  — choose 'Media over QUIC' in the"
     echo "         top-left dropdown, allow the mic, and Connect."
     ;;
   webrtc)
-    CMD=(uv run python bot_web.py --host localhost --port "${WEB_PORT}")
+    CMD=(uv run python bot_web.py --host localhost --port "${LOCAT_WEB_PORT}")
     echo "start: Ollama ready."
     ;;
   headphones)
@@ -84,7 +89,7 @@ echo ""
 # (uv + python + audio threads): a plain `exec`/foreground bot can hang on audio
 # teardown and leave Ctrl-C looking dead.
 set -m
-env LLM_MODEL="${LLM_MODEL}" "${CMD[@]}" &
+env LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL}" "${CMD[@]}" &
 BOT_PID=$!
 
 stop_bot() {

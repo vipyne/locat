@@ -41,7 +41,7 @@ from bot import (
     build_vad_processor,
 )
 
-# STT/LLM/TTS come from services.py (engine choice via STT_ENGINE / TTS_ENGINE).
+# STT/LLM/TTS come from services.py (engine choice via LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE).
 from services import build_llm, build_stt, build_tts
 
 load_dotenv(override=True)

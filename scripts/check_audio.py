@@ -50,7 +50,7 @@ def list_devices(pa: "pyaudio.PyAudio") -> None:
     try:
         default = pa.get_default_input_device_info()
         print(f"\nDefault input device: [{default['index']}] {default['name']}")
-        print("(Set INPUT_DEVICE_INDEX in .env to override which mic bot.py uses.)")
+        print("(Set LOCAT_INPUT_DEVICE_INDEX in .env to override which mic bot.py uses.)")
     except Exception as exc:  # noqa: BLE001
         print(f"\n!! No default input device: {exc}")
 

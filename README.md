@@ -119,8 +119,18 @@ Four model-backed components need weights. Two download from Hugging Face
 (anonymously — none are gated); the LLM is pulled by Ollama. Silero VAD and Smart
 Turn v3 ship *inside* the Pipecat package, so they download nothing.
 
-All checkpoints are steered into the repo-local **`./models/`** tree (gitignored),
-so everything the bot needs lives next to the code.
+All checkpoints are steered into **one directory** — `LOCAT_MODEL_DIR`, default
+`./models/` (gitignored) — so everything the bot needs lives next to the code.
+Every engine follows it, so you can move the whole lot anywhere:
+
+```bash
+mv ./models /Volumes/T7/locat-models
+echo 'LOCAT_MODEL_DIR=/Volumes/T7/locat-models' >> .env
+```
+
+Absolute paths and `~` both work; relative paths resolve against the repo root,
+not your shell's cwd. `config.py` and `scripts/model_dir.sh` implement the same
+rules, so Python and the shell scripts always agree.
 
 **a) Pull the LLM into the repo's Ollama store:**
 
@@ -131,7 +141,7 @@ bash scripts/run_ollama.sh
 This relocates Ollama's model store to `./models/ollama`, starts `ollama serve`,
 pulls the model (`qwen2.5:14b` by default, ~9 GB), and keeps the server running in
 the foreground for the bot. Override the model with
-`LLM_MODEL=qwen2.5:7b bash scripts/run_ollama.sh`. Leave this running (or re-run it)
+`LOCAT_LLM_MODEL=qwen2.5:7b bash scripts/run_ollama.sh`. Leave this running (or re-run it)
 whenever you use the bot — it's the local LLM server.
 
 **b) Prefetch the Whisper + Kokoro weights:**
@@ -140,8 +150,8 @@ whenever you use the bot — it's the local LLM server.
 uv run python scripts/prefetch_models.py
 ```
 
-Downloads Whisper-MLX (`large-v3-turbo`, ~1.5 GB) into `./models/huggingface` and
-Kokoro's ONNX model + voices (~350 MB) into `./models/kokoro`, and load-checks the
+Downloads Whisper-MLX (`large-v3-turbo`, ~1.5 GB) into `$LOCAT_MODEL_DIR/huggingface`
+and Kokoro's ONNX model + voices (~350 MB) into `$LOCAT_MODEL_DIR/kokoro`, and load-checks the
 bundled Silero VAD + Smart Turn v3 (no download). Run this **once, while online**;
 after it finishes the bot can run with Wi-Fi off.
 
@@ -180,7 +190,7 @@ Once the models are fetched:
 2. **Turn off Wi-Fi / enable Airplane Mode.** (It won't use the internet if you don't turn off the internet. This is just showing off.)
 3. `uv run bot.py` and hold a conversation.
 
-With `LOG_LEVEL=DEBUG` (the default) you can watch the logs and confirm no service
+With `LOCAT_LOG_LEVEL=DEBUG` (the default) you can watch the logs and confirm no service
 reaches out to the network after the warm-up.
 
 ---
@@ -228,9 +238,9 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 
 | Component | Service | Notes |
 |---|---|---|
-| Speech-to-text | `WhisperSTTServiceMLX` *(default)* | Apple-Silicon-optimized Whisper via MLX. Alternatives via `STT_ENGINE`: `faster_whisper` (CPU), `moonshine` (tiny CPU ONNX) |
+| Speech-to-text | `WhisperSTTServiceMLX` *(default)* | Apple-Silicon-optimized Whisper via MLX. Alternatives via `LOCAT_STT_ENGINE`: `faster_whisper` (CPU), `moonshine` (tiny CPU ONNX) |
 | Language model | Qwen2.5-14B-Instruct via **Ollama** | Local, OpenAI-compatible endpoint; env-configurable |
-| Text-to-speech | `KokoroTTSService` *(default)* | Natural local neural voice (kokoro-onnx). Alternative via `TTS_ENGINE`: `piper` |
+| Text-to-speech | `KokoroTTSService` *(default)* | Natural local neural voice (kokoro-onnx). Alternative via `LOCAT_TTS_ENGINE`: `piper` |
 | Turn-taking | Silero VAD + Local Smart Turn v3 | Barge-in / interruptions, fully local (bundled with Pipecat) |
 | Transport | `LocalAudioTransport` | PyAudio mic + speaker I/O (requires headphones) |
 | Alternative transports | `SmallWebRTC` / `MoQ` | run in a browser → free echo cancellation via `getUserMedia` |
@@ -243,29 +253,51 @@ Every knob is an environment variable (read from `.env` if present). All are
 optional — the shown value is the default. See [`env.example`](env.example) for
 the copy-paste template.
 
+**`LOCAT_` means it's ours.** Anything read by this repo carries the prefix, so
+you can tell at a glance what's safe to change and what belongs to someone else.
+Exactly four variables are **external** — read by third-party software, keeping
+their upstream names because renaming them would break the tool that reads them:
+
+| External variable | Read by |
+|---|---|
+| `HF_HOME`, `HF_HUB_DISABLE_PROGRESS_BARS` | `huggingface_hub` |
+| `OLLAMA_MODELS`, `OLLAMA_HOST` | the `ollama` binary |
+
+If you already export one of those globally, it affects locat too. Note that
+`LOCAT_OLLAMA_BASE_URL` is *ours* despite the name — it's the URL the bot dials,
+not something ollama reads.
+
 | Variable | Default | What it does |
 |---|---|---|
-| `LLM_MODEL` | `qwen2.5:14b` | Ollama model tag. Same string `run_ollama.sh` pulls and the bot serves. Smaller/faster: `qwen2.5:7b`. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible Ollama endpoint (note the trailing `/v1`). |
-| `STT_ENGINE` | `whisper_mlx`* | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). *Default is `faster_whisper` on non-Apple-Silicon machines. |
-| `WHISPER_MODEL` | `LARGE_V3_TURBO` | `MLXModel` member: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`. Must match what you prefetched. |
-| `FASTER_WHISPER_MODEL` | `DISTIL_MEDIUM_EN` | faster-whisper model (when `STT_ENGINE=faster_whisper`); downloads on first use. |
-| `MOONSHINE_MODEL` | `SMALL_STREAMING` | Moonshine model (when `STT_ENGINE=moonshine`); downloads on first use. |
-| `TTS_ENGINE` | `kokoro` | TTS engine `services.py` builds: `kokoro` or `piper` (`uv sync --extra piper`; piper-tts is GPL-3.0). |
-| `KOKORO_VOICE` | `af_heart` | Kokoro voice id (e.g. `af_bella`, `am_michael`, `bf_emma`). |
-| `PIPER_VOICE` | `en_US-lessac-medium` | Piper voice id (when `TTS_ENGINE=piper`); downloads (~60 MB) on first use into `./models/piper`. |
-| `INPUT_DEVICE_INDEX` | *(system default)* | PyAudio mic index. |
-| `OUTPUT_DEVICE_INDEX` | *(system default)* | PyAudio speaker index. |
-| `GREETING` | *"Hi. I'm your private, offline financial thinking partner…"* | Opening line spoken on startup. |
-| `GREETING_DELAY_SECS` | `1.0` | Delay before the greeting (lets the audio-out stream spin up). |
-| `LOG_LEVEL` | `DEBUG` | Loguru level for stderr. `DEBUG` surfaces each service's activity — handy for the offline check. |
-| `HF_HOME` | `./models/huggingface` | Hugging Face cache root (Whisper-MLX weights). *Advanced.* |
-| `KOKORO_MODEL_PATH` | `./models/kokoro/kokoro-v1.0.onnx` | Kokoro ONNX model path. *Advanced.* |
-| `KOKORO_VOICES_PATH` | `./models/kokoro/voices-v1.0.bin` | Kokoro voices bundle path. *Advanced.* |
-| `OLLAMA_MODELS` | `./models/ollama` | Ollama store location (used by `run_ollama.sh`). *Advanced.* |
-| `OLLAMA_HOST` | `127.0.0.1:11434` | Host the Ollama server binds to (used by `run_ollama.sh`). *Advanced.* |
+| `LOCAT_LLM_MODEL` | `qwen2.5:14b` | Ollama model tag. Same string `run_ollama.sh` pulls and the bot serves. Smaller/faster: `qwen2.5:7b`. |
+| `LOCAT_OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible Ollama endpoint (note the trailing `/v1`). |
+| `LOCAT_STT_ENGINE` | `whisper_mlx`* | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). *Default is `faster_whisper` on non-Apple-Silicon machines. |
+| `LOCAT_WHISPER_MODEL` | `LARGE_V3_TURBO` | `MLXModel` member: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`. Must match what you prefetched. |
+| `LOCAT_FASTER_WHISPER_MODEL` | `DISTIL_MEDIUM_EN` | faster-whisper model (when `LOCAT_STT_ENGINE=faster_whisper`); downloads on first use. |
+| `LOCAT_MOONSHINE_MODEL` | `SMALL_STREAMING` | Moonshine model (when `LOCAT_STT_ENGINE=moonshine`); downloads on first use. |
+| `LOCAT_TTS_ENGINE` | `kokoro` | TTS engine `services.py` builds: `kokoro` or `piper` (`uv sync --extra piper`; piper-tts is GPL-3.0). |
+| `LOCAT_KOKORO_VOICE` | `af_heart` | Kokoro voice id (e.g. `af_bella`, `am_michael`, `bf_emma`). |
+| `LOCAT_PIPER_VOICE` | `en_US-lessac-medium` | Piper voice id (when `LOCAT_TTS_ENGINE=piper`); downloads (~60 MB) on first use into `./models/piper`. |
+| `LOCAT_INPUT_DEVICE_INDEX` | *(system default)* | PyAudio mic index. |
+| `LOCAT_OUTPUT_DEVICE_INDEX` | *(system default)* | PyAudio speaker index. |
+| `LOCAT_GREETING` | *"Hi. I'm your private, offline financial thinking partner…"* | Opening line spoken on startup. |
+| `LOCAT_GREETING_DELAY_SECS` | `1.0` | Delay before the greeting (lets the audio-out stream spin up). |
+| `LOCAT_LOG_LEVEL` | `DEBUG` | Loguru level for stderr. `DEBUG` surfaces each service's activity — handy for the offline check. |
+| `LOCAT_WEB_PORT` | `7860` | Port `bot_web.py` / `bot_moq.py` serve on (used by `./start.sh`). |
+| `LOCAT_VAD_CONFIDENCE` | `0.7` | Silero speech-probability threshold (0–1) before audio counts as speech. |
+| `LOCAT_VAD_MIN_VOLUME` | `0.0` | Absolute-loudness gate. `0.0` disables it, which keeps turn detection level-independent across mics — raise toward `0.3`–`0.6` only if a noisy room false-triggers. |
+| `LOCAT_VAD_START_SECS` | `0.2` | Sustained speech before "user started speaking". |
+| `LOCAT_VAD_STOP_SECS` | `0.2` | Sustained silence before "user stopped speaking". |
+| `LOCAT_MODEL_DIR` | `./models` | **The one directory every model downloads into** — HF cache, Kokoro, Piper and Ollama all hang off it. Absolute, `~`, or relative-to-repo. Move it to relocate everything at once. |
+| `HF_HOME` **[external]** | `$LOCAT_MODEL_DIR/huggingface` | Hugging Face cache root (Whisper-MLX, faster-whisper, Moonshine). Set only to split HF out of the shared dir. *Advanced.* |
+| `HF_HUB_DISABLE_PROGRESS_BARS` **[external]** | `1` | Silences HuggingFace download progress bars, which otherwise clutter the bot's logs. *Advanced.* |
+| `LOCAT_KOKORO_MODEL_PATH` | `$LOCAT_MODEL_DIR/kokoro/kokoro-v1.0.onnx` | Kokoro ONNX model path. *Advanced.* |
+| `LOCAT_KOKORO_VOICES_PATH` | `$LOCAT_MODEL_DIR/kokoro/voices-v1.0.bin` | Kokoro voices bundle path. *Advanced.* |
+| `LOCAT_PIPER_DOWNLOAD_DIR` | `$LOCAT_MODEL_DIR/piper` | Where Piper voices download. *Advanced.* |
+| `OLLAMA_MODELS` **[external]** | `$LOCAT_MODEL_DIR/ollama` | Ollama store location (used by `run_ollama.sh`). Use an absolute path if you set it — ollama resolves relative paths against its own cwd. *Advanced.* |
+| `OLLAMA_HOST` **[external]** | `127.0.0.1:11434` | Host the Ollama server binds to (used by `run_ollama.sh`). *Advanced.* |
 
-Changing `LLM_MODEL` swaps which local model answers; changing `KOKORO_VOICE`
+Changing `LOCAT_LLM_MODEL` swaps which local model answers; changing `LOCAT_KOKORO_VOICE`
 changes the voice you hear.
 
 ---
@@ -274,7 +306,7 @@ changes the voice you hear.
 
 All three bots share one offline brain (the same STT → VAD → LLM → TTS pipeline);
 they differ only in the transport. The STT/LLM/TTS services themselves are built in
-`services.py`, dispatched on `STT_ENGINE` / `TTS_ENGINE` — so swapping engines (via
+`services.py`, dispatched on `LOCAT_STT_ENGINE` / `LOCAT_TTS_ENGINE` — so swapping engines (via
 `.env` or `./doctor.sh -i`) never touches a bot file you may have customized.
 
 ```
@@ -282,7 +314,7 @@ locat/
 ├── bot.py                    # CLI / headphones — LocalAudioTransport
 ├── bot_web.py                # browser / speakers — SmallWebRTC (free echo cancellation)
 ├── bot_moq.py                # browser / speakers — MoQ over QUIC (lower latency)
-├── services.py               # STT/LLM/TTS builders, engine-dispatched (STT_ENGINE / TTS_ENGINE)
+├── services.py               # STT/LLM/TTS builders, engine-dispatched (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE)
 ├── config.py                 # env-driven settings, zero-config defaults
 ├── spoken_text_filter.py     # TTS filter: "$3,000" → "three thousand dollars"
 ├── prompts/
@@ -293,8 +325,11 @@ locat/
 ├── stop.sh                   # stop the background Ollama server
 │
 ├── scripts/
+│   ├── model_dir.sh          # resolves LOCAT_MODEL_DIR for the shell scripts
+│   │                         #   (config.py does the same for Python)
 │   ├── run_ollama.sh         # relocate Ollama store + serve + pull the LLM
 │   ├── prefetch_models.py    # one-time online warm-up (Whisper + Kokoro)
+│   ├── check_wheels.py       # tripwire: every dep must have a wheel per platform
 │   ├── check_audio.py        # diagnostic: raw mic input level meter
 │   └── check_vad.py          # diagnostic: Silero VAD confidence/volume vs thresholds
 │
@@ -310,10 +345,11 @@ locat/
 ├── pyproject.toml            # uv project + pinned deps
 ├── uv.lock                   # locked dependency versions
 │
-└── models/                   # ALL checkpoints live here (gitignored; created by setup)
-    ├── huggingface/          # Whisper-MLX + faster-whisper (HF cache)
+└── models/                   # ALL checkpoints live here — $LOCAT_MODEL_DIR,
+    │                         # relocatable (gitignored; created by setup)
+    ├── huggingface/          # Whisper-MLX + faster-whisper + Moonshine (HF cache)
     ├── kokoro/               # Kokoro onnx + voices
-    ├── piper/                # Piper voices (if TTS_ENGINE=piper)
+    ├── piper/                # Piper voices (if LOCAT_TTS_ENGINE=piper)
     └── ollama/               # Ollama LLM store
 ```
 

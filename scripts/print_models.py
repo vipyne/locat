@@ -3,7 +3,7 @@
 
 Shared by start.sh and doctor.sh so the printed values can never drift from
 what the bot actually loads: everything resolves through config.py (which
-loads ./.env), including the engine choice (STT_ENGINE / TTS_ENGINE) that
+loads ./.env), including the engine choice (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE) that
 services.py dispatches on.
 """
 
@@ -26,7 +26,7 @@ def _stt_line() -> str:
 
             return f"Whisper-MLX {name} ({MLXModel[name].value})"
         except (ImportError, KeyError):
-            # pipecat missing (deps not synced) or WHISPER_MODEL not a valid
+            # pipecat missing (deps not synced) or LOCAT_WHISPER_MODEL not a valid
             # enum member — still print the configured name rather than dying.
             return f"Whisper-MLX {name}"
     if engine == "faster_whisper":

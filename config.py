@@ -6,14 +6,16 @@ defaults so ``uv run bot.py`` works with **zero configuration**.
 
 Two kinds of settings live here:
 
-1. **Cache-dir vars** (``HF_HOME``, Kokoro model/voices paths). These must be
-   set *before* any model library is imported — Hugging Face freezes its cache
-   root at ``huggingface_hub`` import time — so they are established here at
-   *import time* via ``os.environ.setdefault(...)``. Importing this module
-   therefore steers HF / Kokoro caches into the repo-local ``./models/`` tree
-   (matching ``scripts/prefetch_models.py``, so the bot reads weights from
-   exactly where the prefetch wrote them — the key to offline runs). It does
-   NOT load any model, touch audio hardware, or hit the network.
+1. **Cache-dir vars** (``HF_HOME``, Kokoro/Piper paths, ``OLLAMA_MODELS``), all
+   derived from ``LOCAT_MODEL_DIR`` — the single directory every downloaded
+   model lives under, which can be anywhere on the machine. These must be set
+   *before* any model library is imported — Hugging Face freezes its cache root
+   at ``huggingface_hub`` import time — so they are established here at *import
+   time* via ``os.environ.setdefault(...)``. Importing this module therefore
+   steers every engine's cache into that one tree (matching
+   ``scripts/prefetch_models.py`` and ``scripts/model_dir.sh``, so the bot reads
+   weights from exactly where the prefetch wrote them — the key to offline
+   runs). It does NOT load any model, touch audio hardware, or hit the network.
 
    Because of the freeze-at-import behaviour, ``bot.py`` imports this module
    *before* it imports any ``pipecat`` service.
@@ -27,15 +29,16 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
-MODELS_DIR = REPO_ROOT / "models"
-KOKORO_DIR = MODELS_DIR / "kokoro"
+DEFAULT_MODEL_DIR = "./models"
 
 # --- Repo-local cache defaults, established at import time ------------------
-# Load ./.env first so user overrides win over these defaults, then setdefault
-# the cache-dir vars. Mirrors scripts/prefetch_models.py.
+# Load ./.env FIRST — before resolving LOCAT_MODEL_DIR or setdefault-ing any
+# cache var — so user overrides win over these defaults. Mirrors
+# scripts/model_dir.sh (bash) and scripts/prefetch_models.py.
 try:
     from dotenv import load_dotenv
 
@@ -43,16 +46,105 @@ try:
 except Exception:  # python-dotenv is a dep, but never hard-fail on config import
     pass
 
-# Hugging Face cache root (Whisper-MLX weights land here). Steered into the repo
-# so a warmed-up ./models/huggingface is found offline instead of ~/.cache.
+
+def _resolve_model_dir() -> Path:
+    """Absolute path of the one directory holding every downloaded model.
+
+    ``LOCAT_MODEL_DIR`` (default ``./models``) can point anywhere on the machine
+    — an external disk, a shared cache, whatever. Relative paths resolve against
+    the REPO ROOT rather than the process's cwd, so the value means the same
+    thing no matter where the bot was launched from, and a leading ``~`` is
+    expanded. ``scripts/model_dir.sh`` implements the identical rules for the
+    shell scripts that cannot import this module.
+    """
+    raw = os.getenv("LOCAT_MODEL_DIR", "").strip() or DEFAULT_MODEL_DIR
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    # normpath, not Path.resolve(): resolve() would follow symlinks (on macOS
+    # /tmp/x comes back as /private/tmp/x), which surprises anyone who
+    # deliberately points this at a symlinked disk and would also drift from
+    # scripts/model_dir.sh, which cannot resolve symlinks for a path that does
+    # not exist yet. Collapsing "." / ".." textually is all that is needed.
+    return Path(os.path.normpath(path))
+
+
+MODELS_DIR = _resolve_model_dir()
+KOKORO_DIR = MODELS_DIR / "kokoro"
+
+# Every model store hangs off MODELS_DIR so one directory holds the lot. These
+# are setdefault, not assignment: an explicitly-set HF_HOME (etc.) still wins.
+#
+# Hugging Face cache root — Whisper-MLX, faster-whisper AND Moonshine weights
+# all land here. Steered into MODELS_DIR so a warmed-up tree is found offline
+# instead of ~/.cache.
 os.environ.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))
 # Silence HuggingFace's download progress bars ("Fetching N files", "Reconstruction
 # complete") — they clutter the bot's logs on first-use model fetches. Weights are
 # still downloaded; only the noisy tqdm output is suppressed.
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 # Kokoro ONNX + voices bundle (also honored directly by build_tts via these vars).
-os.environ.setdefault("KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.onnx"))
-os.environ.setdefault("KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
+os.environ.setdefault("LOCAT_KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.onnx"))
+os.environ.setdefault("LOCAT_KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
+# Piper's voice download dir. Nothing external reads this — services.py passes
+# it to PiperTTSService(download_dir=...) — but it is kept in the environment so
+# doctor.sh (which cannot import this module) probes the same directory.
+os.environ.setdefault("LOCAT_PIPER_DOWNLOAD_DIR", str(MODELS_DIR / "piper"))
+# Ollama's store. Read by the `ollama` BINARY, not by any Python package: the bot
+# only talks to the server over HTTP. scripts/run_ollama.sh is what actually
+# exports it into `ollama serve`; setting it here keeps doctor.sh and
+# print_models.py reporting the same path the server uses.
+os.environ.setdefault("OLLAMA_MODELS", str(MODELS_DIR / "ollama"))
+
+
+# --- Legacy env names (everything we own gained a LOCAT_ prefix) ------------
+# Renaming is silent by nature: an old key in .env is simply never read, and the
+# bot comes up on defaults with no hint that the setting was dropped. Detect and
+# say so instead.
+_LEGACY_ENV_NAMES = (
+    "STT_ENGINE", "TTS_ENGINE", "WHISPER_MODEL", "FASTER_WHISPER_MODEL",
+    "MOONSHINE_MODEL", "KOKORO_VOICE", "KOKORO_MODEL_PATH", "KOKORO_VOICES_PATH",
+    "PIPER_VOICE", "PIPER_DOWNLOAD_DIR", "LLM_MODEL", "OLLAMA_BASE_URL",
+    "INPUT_DEVICE_INDEX", "OUTPUT_DEVICE_INDEX", "GREETING",
+    "GREETING_DELAY_SECS", "LOG_LEVEL", "VAD_CONFIDENCE", "VAD_MIN_VOLUME",
+    "VAD_START_SECS", "VAD_STOP_SECS", "WEB_PORT",
+)
+
+
+def legacy_env_keys() -> list[str]:
+    """Pre-prefix keys still present in ``./.env``.
+
+    Only the repo's own .env is scanned, never the ambient environment: names
+    like ``LOG_LEVEL`` and ``GREETING`` are generic enough that someone's shell
+    profile could export them for entirely unrelated reasons, and warning about
+    that would be noise. A key in .env, by contrast, was meant for this bot.
+    """
+    path = REPO_ROOT / ".env"
+    if not path.is_file():
+        return []
+    found = []
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key = line.split("=", 1)[0].strip()
+            if key in _LEGACY_ENV_NAMES:
+                found.append(key)
+    except OSError:
+        return []
+    return found
+
+
+_legacy = legacy_env_keys()
+if _legacy:
+    print(
+        "locat: WARNING — these .env keys are no longer read; every setting this "
+        "repo owns now takes a LOCAT_ prefix (the unprefixed names left are the "
+        "four read by huggingface_hub and ollama — see env.example):\n"
+        + "\n".join(f"    {k}  ->  LOCAT_{k}" for k in _legacy),
+        file=sys.stderr,
+    )
 
 
 # --- Defaults for the runtime settings -------------------------------------
@@ -93,8 +185,18 @@ def _get(name: str, default: str) -> str:
     return os.getenv(name, "").strip() or default
 
 
+def model_dir() -> str:
+    """The one directory every downloaded model lives under (LOCAT_MODEL_DIR).
+
+    Resolved to an absolute path at import time; see ``_resolve_model_dir``.
+    Point it anywhere — ``LOCAT_MODEL_DIR=/Volumes/T7/locat-models`` moves the
+    HF cache, Kokoro, Piper and Ollama stores together.
+    """
+    return str(MODELS_DIR)
+
+
 def stt_engine() -> str:
-    """Which STT engine to build (STT_ENGINE; default ``whisper_mlx`` on
+    """Which STT engine to build (LOCAT_STT_ENGINE; default ``whisper_mlx`` on
     Apple Silicon, ``faster_whisper`` elsewhere).
 
     Options (see services.build_stt): ``whisper_mlx`` (Apple-GPU Whisper via MLX,
@@ -102,17 +204,17 @@ def stt_engine() -> str:
     non-Apple-Silicon path), ``moonshine`` (tiny/fast CPU ONNX, English + a few
     languages; needs ``uv sync --extra moonshine``).
     """
-    return _get("STT_ENGINE", DEFAULT_STT_ENGINE)
+    return _get("LOCAT_STT_ENGINE", DEFAULT_STT_ENGINE)
 
 
 def tts_engine() -> str:
-    """Which TTS engine to build (TTS_ENGINE, default ``kokoro``).
+    """Which TTS engine to build (LOCAT_TTS_ENGINE, default ``kokoro``).
 
     Options (see services.build_tts): ``kokoro`` (ONNX, ~0.3 GB, 50+ voices),
     ``piper`` (in-process piper-tts, small fast voices; needs
     ``uv sync --extra piper``).
     """
-    return _get("TTS_ENGINE", DEFAULT_TTS_ENGINE)
+    return _get("LOCAT_TTS_ENGINE", DEFAULT_TTS_ENGINE)
 
 
 def whisper_model() -> str:
@@ -121,48 +223,58 @@ def whisper_model() -> str:
     Other members: TINY, MEDIUM, LARGE_V3. Must match a member the prefetch
     downloaded (``scripts/prefetch_models.py`` reads the same var).
     """
-    return _get("WHISPER_MODEL", DEFAULT_WHISPER_MODEL)
+    return _get("LOCAT_WHISPER_MODEL", DEFAULT_WHISPER_MODEL)
 
 
 def faster_whisper_model() -> str:
     """``Model`` member name for faster-whisper STT (default DISTIL_MEDIUM_EN).
 
-    Only used when STT_ENGINE=faster_whisper. Members (pipecat
+    Only used when LOCAT_STT_ENGINE=faster_whisper. Members (pipecat
     ``services.whisper.stt.Model``): TINY, BASE, SMALL, MEDIUM, LARGE,
     LARGE_V3_TURBO, DISTIL_LARGE_V2, DISTIL_MEDIUM_EN (English-only).
     Weights download from Hugging Face on first use (cached under HF_HOME).
     """
-    return _get("FASTER_WHISPER_MODEL", DEFAULT_FASTER_WHISPER_MODEL)
+    return _get("LOCAT_FASTER_WHISPER_MODEL", DEFAULT_FASTER_WHISPER_MODEL)
 
 
 def moonshine_model() -> str:
     """``Model`` member name for Moonshine STT (default SMALL_STREAMING).
 
-    Only used when STT_ENGINE=moonshine. Members (pipecat
+    Only used when LOCAT_STT_ENGINE=moonshine. Members (pipecat
     ``services.moonshine.stt.Model``): TINY, BASE, TINY_STREAMING,
     BASE_STREAMING, SMALL_STREAMING, MEDIUM_STREAMING. Weights download from
     the Moonshine hub on first use.
     """
-    return _get("MOONSHINE_MODEL", DEFAULT_MOONSHINE_MODEL)
+    return _get("LOCAT_MOONSHINE_MODEL", DEFAULT_MOONSHINE_MODEL)
 
 
 def piper_voice() -> str:
     """Piper voice id (default ``en_US-lessac-medium``).
 
-    Only used when TTS_ENGINE=piper. Any id from the Piper voices collection
+    Only used when LOCAT_TTS_ENGINE=piper. Any id from the Piper voices collection
     (huggingface.co/rhasspy/piper-voices) works; the ~60 MB voice model
-    downloads on first use into ``./models/piper/``.
+    downloads on first use into ``$LOCAT_MODEL_DIR/piper/``.
     """
-    return _get("PIPER_VOICE", DEFAULT_PIPER_VOICE)
+    return _get("LOCAT_PIPER_VOICE", DEFAULT_PIPER_VOICE)
 
 
 def piper_download_dir() -> str:
-    """Directory Piper voices download into (PIPER_DOWNLOAD_DIR).
+    """Directory Piper voices download into (LOCAT_PIPER_DOWNLOAD_DIR).
 
-    Defaults to ./models/piper — keeping every checkpoint the bot needs inside
-    the repo-local ./models/ tree, like the other engines.
+    Defaults to ``$LOCAT_MODEL_DIR/piper`` — every checkpoint the bot needs
+    stays inside the one model directory, like the other engines.
     """
-    return _get("PIPER_DOWNLOAD_DIR", str(MODELS_DIR / "piper"))
+    return _get("LOCAT_PIPER_DOWNLOAD_DIR", str(MODELS_DIR / "piper"))
+
+
+def ollama_models_dir() -> str:
+    """Directory Ollama keeps the LLM in (OLLAMA_MODELS).
+
+    Defaults to ``$LOCAT_MODEL_DIR/ollama``. Set by scripts/run_ollama.sh before
+    it starts the server; exposed here so doctor.sh and print_models.py can
+    report the same path the server actually uses.
+    """
+    return _get("OLLAMA_MODELS", str(MODELS_DIR / "ollama"))
 
 
 def llm_model() -> str:
@@ -171,7 +283,7 @@ def llm_model() -> str:
     The same string ``scripts/run_ollama.sh`` uses to ``ollama pull``, so the
     bot and the pull agree on which model is served.
     """
-    return _get("LLM_MODEL", DEFAULT_LLM_MODEL)
+    return _get("LOCAT_LLM_MODEL", DEFAULT_LLM_MODEL)
 
 
 def ollama_base_url() -> str:
@@ -179,7 +291,7 @@ def ollama_base_url() -> str:
 
     Note the trailing ``/v1``: the OpenAI-compat path, not the native API root.
     """
-    return _get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+    return _get("LOCAT_OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
 
 
 def kokoro_voice() -> str:
@@ -188,17 +300,17 @@ def kokoro_voice() -> str:
     Kokoro's shipped ``Settings.voice`` default is ``None`` (unsynthesizable),
     so the bot always supplies an explicit id.
     """
-    return _get("KOKORO_VOICE", DEFAULT_KOKORO_VOICE)
+    return _get("LOCAT_KOKORO_VOICE", DEFAULT_KOKORO_VOICE)
 
 
 def kokoro_model_path() -> str:
-    """Path to the Kokoro ONNX model (default ./models/kokoro/kokoro-v1.0.onnx)."""
-    return _get("KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.onnx"))
+    """Kokoro ONNX model path (default $LOCAT_MODEL_DIR/kokoro/kokoro-v1.0.onnx)."""
+    return _get("LOCAT_KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.onnx"))
 
 
 def kokoro_voices_path() -> str:
-    """Path to the Kokoro voices bundle (default ./models/kokoro/voices-v1.0.bin)."""
-    return _get("KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
+    """Kokoro voices bundle path (default $LOCAT_MODEL_DIR/kokoro/voices-v1.0.bin)."""
+    return _get("LOCAT_KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
 
 
 def _device_index(name: str) -> int | None:
@@ -208,36 +320,36 @@ def _device_index(name: str) -> int | None:
 
 
 def input_device_index() -> int | None:
-    """Mic device index (INPUT_DEVICE_INDEX); None = system default input."""
-    return _device_index("INPUT_DEVICE_INDEX")
+    """Mic device index (LOCAT_INPUT_DEVICE_INDEX); None = system default input."""
+    return _device_index("LOCAT_INPUT_DEVICE_INDEX")
 
 
 def output_device_index() -> int | None:
-    """Speaker device index (OUTPUT_DEVICE_INDEX); None = system default output."""
-    return _device_index("OUTPUT_DEVICE_INDEX")
+    """Speaker device index (LOCAT_OUTPUT_DEVICE_INDEX); None = system default output."""
+    return _device_index("LOCAT_OUTPUT_DEVICE_INDEX")
 
 
 def greeting() -> str:
-    """Opening line the bot speaks on startup (GREETING)."""
-    return _get("GREETING", DEFAULT_GREETING)
+    """Opening line the bot speaks on startup (LOCAT_GREETING)."""
+    return _get("LOCAT_GREETING", DEFAULT_GREETING)
 
 
 def greeting_delay_secs() -> float:
-    """Seconds to wait before speaking the greeting (GREETING_DELAY_SECS).
+    """Seconds to wait before speaking the greeting (LOCAT_GREETING_DELAY_SECS).
 
     Gives the local audio-output stream time to spin up before the first frame.
     """
-    raw = os.getenv("GREETING_DELAY_SECS", "").strip()
+    raw = os.getenv("LOCAT_GREETING_DELAY_SECS", "").strip()
     return float(raw) if raw else DEFAULT_GREETING_DELAY_SECS
 
 
 def log_level() -> str:
-    """Loguru level for stderr logging (LOG_LEVEL, default DEBUG).
+    """Loguru level for stderr logging (LOCAT_LOG_LEVEL, default DEBUG).
 
     DEBUG surfaces each service's activity — useful during the offline
     verification to confirm no service silently reaches the network.
     """
-    return _get("LOG_LEVEL", DEFAULT_LOG_LEVEL)
+    return _get("LOCAT_LOG_LEVEL", DEFAULT_LOG_LEVEL)
 
 
 def _get_float(name: str, default: float) -> float:
@@ -247,24 +359,24 @@ def _get_float(name: str, default: float) -> float:
 
 
 def vad_confidence() -> float:
-    """Silero speech-probability threshold (VAD_CONFIDENCE, default 0.7)."""
-    return _get_float("VAD_CONFIDENCE", DEFAULT_VAD_CONFIDENCE)
+    """Silero speech-probability threshold (LOCAT_VAD_CONFIDENCE, default 0.7)."""
+    return _get_float("LOCAT_VAD_CONFIDENCE", DEFAULT_VAD_CONFIDENCE)
 
 
 def vad_min_volume() -> float:
-    """Absolute-loudness gate (VAD_MIN_VOLUME, default 0.0 = disabled).
+    """Absolute-loudness gate (LOCAT_VAD_MIN_VOLUME, default 0.0 = disabled).
 
     0.0 makes turn detection level-independent (portable across mics/machines).
     Raise toward 0.3-0.6 to reject low-level background noise on a loud setup.
     """
-    return _get_float("VAD_MIN_VOLUME", DEFAULT_VAD_MIN_VOLUME)
+    return _get_float("LOCAT_VAD_MIN_VOLUME", DEFAULT_VAD_MIN_VOLUME)
 
 
 def vad_start_secs() -> float:
-    """Sustained speech before 'user started speaking' (VAD_START_SECS, default 0.2)."""
-    return _get_float("VAD_START_SECS", DEFAULT_VAD_START_SECS)
+    """Sustained speech before 'user started speaking' (LOCAT_VAD_START_SECS, default 0.2)."""
+    return _get_float("LOCAT_VAD_START_SECS", DEFAULT_VAD_START_SECS)
 
 
 def vad_stop_secs() -> float:
-    """Sustained silence before 'user stopped speaking' (VAD_STOP_SECS, default 0.2)."""
-    return _get_float("VAD_STOP_SECS", DEFAULT_VAD_STOP_SECS)
+    """Sustained silence before 'user stopped speaking' (LOCAT_VAD_STOP_SECS, default 0.2)."""
+    return _get_float("LOCAT_VAD_STOP_SECS", DEFAULT_VAD_STOP_SECS)

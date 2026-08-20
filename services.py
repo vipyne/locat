@@ -4,8 +4,8 @@ The three service builders live here, OUTSIDE the bot files, so that switching
 engines (via ``.env`` / ``./doctor.sh -i``) never touches ``bot.py`` /
 ``bot_moq.py`` / ``bot_web.py`` — customize your pipeline freely in bot*.py.
 
-Each builder reads its engine choice from config (``STT_ENGINE`` /
-``TTS_ENGINE``) and constructs the matching Pipecat service:
+Each builder reads its engine choice from config (``LOCAT_STT_ENGINE`` /
+``LOCAT_TTS_ENGINE``) and constructs the matching Pipecat service:
 
     STT: whisper_mlx (default) | faster_whisper | moonshine
     LLM: Ollama (the only local LLM path)
@@ -35,14 +35,14 @@ def _engine_exit(engine: str, extra: str, exc: Exception) -> "None":
 
 
 def build_stt():
-    """Build the speech-to-text service selected by ``STT_ENGINE``."""
+    """Build the speech-to-text service selected by ``LOCAT_STT_ENGINE``."""
     engine = config.stt_engine()
 
     if engine == "whisper_mlx":
         if not config.IS_APPLE_SILICON:
             sys.exit(
-                "\n✖ STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
-                "  Set STT_ENGINE=faster_whisper in .env (or run ./doctor.sh -i)\n"
+                "\n✖ LOCAT_STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
+                "  Set LOCAT_STT_ENGINE=faster_whisper in .env (or run ./doctor.sh -i)\n"
             )
         from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 
@@ -64,7 +64,7 @@ def build_stt():
         return MoonshineSTTService(settings=MoonshineSTTService.Settings(model=model.value))
 
     sys.exit(
-        f"\n✖ Unknown STT_ENGINE '{engine}'"
+        f"\n✖ Unknown LOCAT_STT_ENGINE '{engine}'"
         f" — valid: whisper_mlx (default), faster_whisper, moonshine\n"
     )
 
@@ -80,7 +80,7 @@ def build_llm():
 
 
 def build_tts():
-    """Build the text-to-speech service selected by ``TTS_ENGINE``."""
+    """Build the text-to-speech service selected by ``LOCAT_TTS_ENGINE``."""
     engine = config.tts_engine()
 
     if engine == "kokoro":
@@ -106,4 +106,4 @@ def build_tts():
             text_filters=[SpokenTextFilter()],
         )
 
-    sys.exit(f"\n✖ Unknown TTS_ENGINE '{engine}' — valid: kokoro (default), piper\n")
+    sys.exit(f"\n✖ Unknown LOCAT_TTS_ENGINE '{engine}' — valid: kokoro (default), piper\n")

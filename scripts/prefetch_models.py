@@ -10,7 +10,7 @@ model-backed components fetch their weights from the network on first use:
     * Smart Turn v3      — *bundled inside the pipecat package* (no download).
 
 This script forces the two that DO hit the network to download NOW, while you
-still have connectivity, and it steers every cache into ``./models/`` (gitignored)
+still have connectivity, and it steers every cache into ``$LOCAT_MODEL_DIR`` (gitignored)
 so all checkpoints live next to the code. Run it once:
 
     uv run python scripts/prefetch_models.py
@@ -19,40 +19,34 @@ After it finishes you can turn off Wi-Fi and ``uv run bot.py`` will find every
 weight locally. (Ollama's LLM is pulled separately by ``scripts/run_ollama.sh``.)
 
 Config knobs (env or ./.env, all optional — sensible defaults):
-    HF_HOME              Hugging Face cache root      (default ./models/huggingface)
-    WHISPER_MODEL        MLXModel member name         (default LARGE_V3_TURBO)
-    KOKORO_MODEL_PATH    Kokoro ONNX destination      (default ./models/kokoro/kokoro-v1.0.onnx)
-    KOKORO_VOICES_PATH   Kokoro voices destination    (default ./models/kokoro/voices-v1.0.bin)
+    LOCAT_MODEL_DIR      the one directory all models go in  (default ./models)
+    LOCAT_WHISPER_MODEL        MLXModel member name                (default LARGE_V3_TURBO)
+    HF_HOME              HF cache root       (default $LOCAT_MODEL_DIR/huggingface)
+    LOCAT_KOKORO_MODEL_PATH    Kokoro ONNX dest.   (default $LOCAT_MODEL_DIR/kokoro/kokoro-v1.0.onnx)
+    LOCAT_KOKORO_VOICES_PATH   Kokoro voices dest. (default $LOCAT_MODEL_DIR/kokoro/voices-v1.0.bin)
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
-# --- Resolve repo-local cache locations and export them BEFORE importing any
-#     model library, so Hugging Face / MLX / Kokoro see them at import time. ----
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MODELS_DIR = REPO_ROOT / "models"
+# --- Resolve cache locations BEFORE importing any model library, so Hugging
+#     Face / MLX / Kokoro see them at import time. -------------------------------
+# Importing config does all of it: loads ./.env, resolves LOCAT_MODEL_DIR, and
+# setdefaults HF_HOME / KOKORO_* / LOCAT_PIPER_DOWNLOAD_DIR / OLLAMA_MODELS. Sharing
+# that one resolver is what guarantees the prefetch writes exactly where the bot
+# later reads — the whole point of the warm-up.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Load ./.env first (if present) so user overrides win, then fill defaults.
-try:
-    from dotenv import load_dotenv
+import config  # noqa: E402
 
-    load_dotenv(REPO_ROOT / ".env")
-except Exception:  # python-dotenv should be installed, but never hard-fail here.
-    pass
-
-os.environ.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))
-
+MODELS_DIR = Path(config.model_dir())
 KOKORO_DIR = MODELS_DIR / "kokoro"
-KOKORO_MODEL_PATH = Path(
-    os.environ.setdefault("KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.onnx"))
-)
-KOKORO_VOICES_PATH = Path(
-    os.environ.setdefault("KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
-)
-WHISPER_MODEL = os.environ.setdefault("WHISPER_MODEL", "LARGE_V3_TURBO")
+LOCAT_KOKORO_MODEL_PATH = Path(config.kokoro_model_path())
+LOCAT_KOKORO_VOICES_PATH = Path(config.kokoro_voices_path())
+LOCAT_WHISPER_MODEL = os.environ.setdefault("LOCAT_WHISPER_MODEL", config.whisper_model())
 
 # Make sure the target directories exist before anything writes into them.
 Path(os.environ["HF_HOME"]).mkdir(parents=True, exist_ok=True)
@@ -74,11 +68,11 @@ def prefetch_whisper_mlx() -> None:
     from pipecat.services.whisper.stt import MLXModel
 
     try:
-        repo_id = MLXModel[WHISPER_MODEL].value
+        repo_id = MLXModel[LOCAT_WHISPER_MODEL].value
     except KeyError as exc:
         valid = ", ".join(m.name for m in MLXModel)
         raise SystemExit(
-            f"WHISPER_MODEL='{WHISPER_MODEL}' is not a valid MLXModel. Choose one of: {valid}"
+            f"LOCAT_WHISPER_MODEL='{LOCAT_WHISPER_MODEL}' is not a valid MLXModel. Choose one of: {valid}"
         ) from exc
 
     logger.info(f"Whisper-MLX: downloading '{repo_id}' → {os.environ['HF_HOME']} ...")
@@ -87,7 +81,7 @@ def prefetch_whisper_mlx() -> None:
 
 
 def prefetch_kokoro() -> None:
-    """Force Kokoro's ONNX model + voices bundle onto disk under ./models/kokoro.
+    """Force Kokoro's ONNX model + voices bundle onto disk under $LOCAT_MODEL_DIR/kokoro.
 
     ``KokoroTTSService.__init__`` calls ``_ensure_model_files(model_path, voices_path)``,
     which downloads both files if they are missing, then loads them. Passing our
@@ -96,12 +90,12 @@ def prefetch_kokoro() -> None:
     from pipecat.services.kokoro.tts import KokoroTTSService
 
     logger.info(
-        f"Kokoro: ensuring model → {KOKORO_MODEL_PATH} and voices → {KOKORO_VOICES_PATH} ..."
+        f"Kokoro: ensuring model → {LOCAT_KOKORO_MODEL_PATH} and voices → {LOCAT_KOKORO_VOICES_PATH} ..."
     )
     # Construction triggers the download + a load of the ONNX model.
     KokoroTTSService(
-        model_path=str(KOKORO_MODEL_PATH),
-        voices_path=str(KOKORO_VOICES_PATH),
+        model_path=str(LOCAT_KOKORO_MODEL_PATH),
+        voices_path=str(LOCAT_KOKORO_VOICES_PATH),
     )
     logger.success("Kokoro ready.")
 

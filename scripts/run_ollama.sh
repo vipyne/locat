@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
 # run_ollama.sh — start a local Ollama server whose model store lives INSIDE this
-# repo (./models/ollama), then pull the conversation LLM.
+# one model directory ($LOCAT_MODEL_DIR/ollama), then pull the conversation LLM.
 #
 # Why relocate the store: the whole point of `locat` is a self-contained, fully
-# offline bot. Keeping the Ollama blobs under ./models/ (gitignored) means every
-# checkpoint the bot needs lives in one place next to the code.
+# offline bot. Keeping the Ollama blobs under $LOCAT_MODEL_DIR means every
+# checkpoint the bot needs lives in one place — see scripts/model_dir.sh.
 #
 # Usage:
 #   ./scripts/run_ollama.sh            # serve + pull the default model
-#   LLM_MODEL=qwen2.5:7b ./scripts/run_ollama.sh
+#   LOCAT_LLM_MODEL=qwen2.5:7b ./scripts/run_ollama.sh
 #
 # The server keeps running in the foreground so you can Ctrl-C to stop it, or run
 # the whole script in the background (`./scripts/run_ollama.sh &`). The bot talks
@@ -21,23 +21,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# --- load .env for overrides (LLM_MODEL, OLLAMA_HOST), if present -----------
+# --- load .env for overrides (LOCAT_LLM_MODEL, OLLAMA_HOST), if present -----------
 if [[ -f "${REPO_ROOT}/.env" ]]; then
   # shellcheck disable=SC1091
   set -a; source "${REPO_ROOT}/.env"; set +a
 fi
 
 # --- config (env-overridable) ------------------------------------------------
-export OLLAMA_MODELS="${OLLAMA_MODELS:-${REPO_ROOT}/models/ollama}"
+# Resolves LOCAT_MODEL_DIR and exports OLLAMA_MODELS (plus the other engines'
+# stores) so the LLM lands in the same directory as every other model.
+LOCAT_REPO_ROOT="${REPO_ROOT}"
+# shellcheck source=model_dir.sh
+. "${SCRIPT_DIR}/model_dir.sh"
+
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_HOST
-LLM_MODEL="${LLM_MODEL:-qwen2.5:14b}"
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
 
 mkdir -p "${OLLAMA_MODELS}"
 
 echo "run_ollama: OLLAMA_MODELS=${OLLAMA_MODELS}"
 echo "run_ollama: OLLAMA_HOST=${OLLAMA_HOST}"
-echo "run_ollama: LLM_MODEL=${LLM_MODEL}"
+echo "run_ollama: LOCAT_LLM_MODEL=${LOCAT_LLM_MODEL}"
 
 # --- is a server already listening on this host? ----------------------------
 # `ollama list` returns non-zero if it can't reach a server.
@@ -69,8 +74,8 @@ else
 fi
 
 # --- pull the model (no-op if already present) ------------------------------
-echo "run_ollama: pulling '${LLM_MODEL}' (this needs network the first time)..."
-OLLAMA_HOST="${OLLAMA_HOST}" ollama pull "${LLM_MODEL}"
+echo "run_ollama: pulling '${LOCAT_LLM_MODEL}' (this needs network the first time)..."
+OLLAMA_HOST="${OLLAMA_HOST}" ollama pull "${LOCAT_LLM_MODEL}"
 
 echo "run_ollama: done. Available models:"
 OLLAMA_HOST="${OLLAMA_HOST}" ollama list

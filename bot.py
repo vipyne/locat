@@ -9,7 +9,7 @@ full-duplex pipeline:
 
 Everything runs locally: LocalAudioTransport (mic + speakers), Silero VAD + Local
 Smart Turn v3 for turn-taking, and the STT/LLM/TTS engines built by services.py
-(defaults: Whisper-MLX, Ollama, Kokoro — swappable via STT_ENGINE / TTS_ENGINE in
+(defaults: Whisper-MLX, Ollama, Kokoro — swappable via LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE in
 .env or ./doctor.sh -i). No cloud services, no API keys.
 
 Importing this module has no side effects (no audio device access, no model loads) —
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 # Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
 # Kokoro cache paths) at import time, and Hugging Face freezes its cache root when
 # huggingface_hub is imported, so this ordering is what makes the bot read the
-# prefetched ./models/huggingface weights offline.
+# prefetched $LOCAT_MODEL_DIR/huggingface weights offline.
 import config
 
 from dotenv import load_dotenv
@@ -49,7 +49,7 @@ if TYPE_CHECKING:  # import for typing only — see build_transport() for why
 from prompts.financial_advisor import SYSTEM_PROMPT
 
 # STT / LLM / TTS construction lives in services.py, dispatched on the
-# STT_ENGINE / TTS_ENGINE env vars — swap engines via .env (or ./doctor.sh -i)
+# LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE env vars — swap engines via .env (or ./doctor.sh -i)
 # without touching this file.
 from services import build_llm, build_stt, build_tts  # noqa: F401  (re-exported)
 
@@ -57,7 +57,7 @@ from services import build_llm, build_stt, build_tts  # noqa: F401  (re-exported
 def build_transport() -> "LocalAudioTransport":
     """Build the local audio transport (mic in + speaker out).
 
-    - Device indices come from config (INPUT_DEVICE_INDEX / OUTPUT_DEVICE_INDEX;
+    - Device indices come from config (LOCAT_INPUT_DEVICE_INDEX / LOCAT_OUTPUT_DEVICE_INDEX;
       default: the system default input/output devices).
 
     PyAudio is imported here rather than at module scope on purpose. It is an
@@ -122,7 +122,7 @@ async def _speak_greeting(worker: PipelineWorker) -> None:
 
 
 def _configure_logging() -> None:
-    """Route Pipecat's loguru output to stderr at LOG_LEVEL (default DEBUG).
+    """Route Pipecat's loguru output to stderr at LOCAT_LOG_LEVEL (default DEBUG).
     """
     logger.remove()
     logger.add(sys.stderr, level=config.log_level())
@@ -152,7 +152,7 @@ def _preflight_llm(model: str, base_url: str) -> None:
         sys.exit(
             f"\n✖ LLM model '{model}' is not available in Ollama at {base_url}\n"
             f"  Pull it:            ollama pull {model}\n"
-            f"  Or set LLM_MODEL in .env to one you have: {listed}\n"
+            f"  Or set LOCAT_LLM_MODEL in .env to one you have: {listed}\n"
         )
     logger.info(f"LLM preflight OK: '{model}' available at {base_url}")
 

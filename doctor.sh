@@ -24,6 +24,11 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
 [[ -f .env ]] && { set -a; source .env; set +a; }
+# .env first (it may set LOCAT_MODEL_DIR), then resolve the one model directory
+# and export HF_HOME / OLLAMA_MODELS / LOCAT_PIPER_DOWNLOAD_DIR / KOKORO_* from it.
+LOCAT_REPO_ROOT="$REPO"
+# shellcheck source=scripts/model_dir.sh
+. "$REPO/scripts/model_dir.sh"
 
 usage() {
   cat <<'EOF'
@@ -51,7 +56,7 @@ Options:
   -h, --help               this help
 
 Environment:
-  DOCTOR_RAM_GB=<n>        pretend the machine has <n> GB RAM (preview what
+  LOCAT_DOCTOR_RAM_GB=<n>        pretend the machine has <n> GB RAM (preview what
                            doctor would say on a smaller machine)
 
 Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
@@ -114,7 +119,7 @@ LLM_CATALOG=(
   "deepseek-r1:70b|43|reasoning: thinks before speaking"
 )
 
-# STT engine tables. services.py builds whichever engine STT_ENGINE selects.
+# STT engine tables. services.py builds whichever engine LOCAT_STT_ENGINE selects.
 # Whisper-MLX (Apple GPU): MLXModel member|display GB|GB rounded up|HF repo dir
 WHISPER_TABLE=(
   "TINY|0.2|1|whisper-tiny"
@@ -170,9 +175,9 @@ llm_needs_gb() {
 # yet — under WSL this takes the Linux path.
 OS="$(uname -s)"; ARCH="$(uname -m)"
 MLX_OK=0
-# DOCTOR_PLATFORM overrides detection for previewing/testing another platform's
-# behavior, e.g.:  DOCTOR_PLATFORM=Darwin/x86_64 ./doctor.sh -v
-EFFECTIVE_PLATFORM="${DOCTOR_PLATFORM:-${OS}/${ARCH}}"
+# LOCAT_DOCTOR_PLATFORM overrides detection for previewing/testing another platform's
+# behavior, e.g.:  LOCAT_DOCTOR_PLATFORM=Darwin/x86_64 ./doctor.sh -v
+EFFECTIVE_PLATFORM="${LOCAT_DOCTOR_PLATFORM:-${OS}/${ARCH}}"
 case "$EFFECTIVE_PLATFORM" in
   Darwin/arm64) PLATFORM="Apple Silicon Mac"; MLX_OK=1 ;;
   Darwin/*)     PLATFORM="Intel Mac" ;;
@@ -199,9 +204,9 @@ else
   CPU_PERF=""; CPU_EFF=""
   OS_VER_LABEL="kernel"; OS_VER="$(uname -r)"
 fi
-# DOCTOR_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
-# e.g.:  DOCTOR_RAM_GB=8 ./doctor.sh -v
-RAM_GB="${DOCTOR_RAM_GB:-$DETECTED_RAM}"
+# LOCAT_DOCTOR_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
+# e.g.:  LOCAT_DOCTOR_RAM_GB=8 ./doctor.sh -v
+RAM_GB="${LOCAT_DOCTOR_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
 
 # Memory bandwidth (GB/s) — decode speed of a q4 LLM is bandwidth-bound, so
@@ -252,7 +257,8 @@ llm_verdict() {
 }
 
 # --- Installed-model / engine-support detection (read-only) -----------------
-OLLAMA_MODELS="${OLLAMA_MODELS:-$REPO/models/ollama}"
+# OLLAMA_MODELS / HF_HOME / LOCAT_PIPER_DOWNLOAD_DIR are already resolved and exported
+# by scripts/model_dir.sh at the top of this file.
 INSTALLED_TAGS=""
 if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then
   INSTALLED_TAGS="$(ollama list 2>/dev/null | awk 'NR>1{print $1}')"
@@ -269,11 +275,11 @@ llm_installed() {
 }
 
 hf_model_installed() {  # $1 = HF cache dir suffix, e.g. mlx-community--whisper-tiny
-  [[ -d "${HF_HOME:-$REPO/models/huggingface}/hub/models--$1" ]]
+  [[ -d "${HF_HOME}/hub/models--$1" ]]
 }
 
 piper_voice_installed() {  # $1 = piper voice id
-  [[ -f "${PIPER_DOWNLOAD_DIR:-$REPO/models/piper}/$1.onnx" ]]
+  [[ -f "${LOCAT_PIPER_DOWNLOAD_DIR}/$1.onnx" ]]
 }
 
 # Optional-extra support: *_OK = 1 when the extra's package is importable in the
@@ -638,9 +644,9 @@ if (( INTERACTIVE )); then
   print_slot_reccos llm
   print_catalog_table numbered
   OLD_IFS="$IFS"; IFS=$'\n'; CATALOG_ROWS=( $(sorted_catalog_rows) ); IFS="$OLD_IFS"
-  read -r -p "choose LLM [default ${LLM_MODEL:-qwen2.5:14b}]: " ans || ans=""
+  read -r -p "choose LLM [default ${LOCAT_LLM_MODEL:-qwen2.5:14b}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    CHOSEN_LLM="${LLM_MODEL:-qwen2.5:14b}"
+    CHOSEN_LLM="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#CATALOG_ROWS[@]} )); then
     CHOSEN_LLM="$(echo "${CATALOG_ROWS[$((ans - 1))]}" | cut -d'|' -f3)"
   else
@@ -692,20 +698,20 @@ if (( INTERACTIVE )); then
 
   # Which model var the chosen STT engine reads (see config.py).
   case "$CHOSEN_STT_ENGINE" in
-    whisper_mlx)    STT_MODEL_VAR="WHISPER_MODEL" ;;
-    faster_whisper) STT_MODEL_VAR="FASTER_WHISPER_MODEL" ;;
-    moonshine)      STT_MODEL_VAR="MOONSHINE_MODEL" ;;
+    whisper_mlx)    STT_MODEL_VAR="LOCAT_WHISPER_MODEL" ;;
+    faster_whisper) STT_MODEL_VAR="LOCAT_FASTER_WHISPER_MODEL" ;;
+    moonshine)      STT_MODEL_VAR="LOCAT_MOONSHINE_MODEL" ;;
   esac
   case "$CHOSEN_TTS_ENGINE" in
-    kokoro) TTS_VOICE_VAR="KOKORO_VOICE" ;;
-    piper)  TTS_VOICE_VAR="PIPER_VOICE" ;;
+    kokoro) TTS_VOICE_VAR="LOCAT_KOKORO_VOICE" ;;
+    piper)  TTS_VOICE_VAR="LOCAT_PIPER_VOICE" ;;
   esac
   echo
   echo "  .env lines for this combo:"
-  echo "     STT_ENGINE=${CHOSEN_STT_ENGINE}"
+  echo "     LOCAT_STT_ENGINE=${CHOSEN_STT_ENGINE}"
   echo "     ${STT_MODEL_VAR}=${CHOSEN_STT_MODEL}"
-  echo "     LLM_MODEL=${CHOSEN_LLM}"
-  echo "     TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
+  echo "     LOCAT_LLM_MODEL=${CHOSEN_LLM}"
+  echo "     LOCAT_TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
   echo "     ${TTS_VOICE_VAR}=${CHOSEN_VOICE}"
   echo
   if (( ! APPROVED )); then
@@ -724,12 +730,12 @@ if (( INTERACTIVE )); then
   read -r -p "write these to .env? (existing .env backed up to .env.bak) [y/N] " ans || ans=""
   if [[ "$ans" =~ ^[Yy] ]]; then
     [[ -f .env ]] && cp .env .env.bak
-    env_set STT_ENGINE "$CHOSEN_STT_ENGINE"
+    env_set LOCAT_STT_ENGINE "$CHOSEN_STT_ENGINE"
     env_set "$STT_MODEL_VAR" "$CHOSEN_STT_MODEL"
-    env_set LLM_MODEL "$CHOSEN_LLM"
-    env_set TTS_ENGINE "$CHOSEN_TTS_ENGINE"
+    env_set LOCAT_LLM_MODEL "$CHOSEN_LLM"
+    env_set LOCAT_TTS_ENGINE "$CHOSEN_TTS_ENGINE"
     env_set "$TTS_VOICE_VAR" "$CHOSEN_VOICE"
-    pass "wrote .env (STT_ENGINE, ${STT_MODEL_VAR}, LLM_MODEL, TTS_ENGINE, ${TTS_VOICE_VAR})"
+    pass "wrote .env (LOCAT_STT_ENGINE, ${STT_MODEL_VAR}, LOCAT_LLM_MODEL, LOCAT_TTS_ENGINE, ${TTS_VOICE_VAR})"
   else
     echo "  skipped — paste the lines above into .env yourself if you want them"
   fi
@@ -779,16 +785,16 @@ if (( INTERACTIVE )); then
             warn "ollama pull failed — check the tag name and network"
           fi
         else
-          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LLM_MODEL from .env on startup)"
+          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOCAT_LLM_MODEL from .env on startup)"
         fi
       fi
       if (( NEED_WHISPER )); then
         if command -v uv >/dev/null 2>&1; then
-          if ! WHISPER_MODEL="$CHOSEN_STT_MODEL" uv run python scripts/prefetch_models.py; then
-            warn "whisper prefetch failed — retry with: WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
+          if ! LOCAT_WHISPER_MODEL="$CHOSEN_STT_MODEL" uv run python scripts/prefetch_models.py; then
+            warn "whisper prefetch failed — retry with: LOCAT_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
           fi
         else
-          warn "uv not on PATH — install it, then: WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
+          warn "uv not on PATH — install it, then: LOCAT_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
         fi
       fi
     else
@@ -821,7 +827,7 @@ else
 fi
 
 # --- RAM vs the configured LLM (only speak up if something's off) ------------
-LLM_MODEL="${LLM_MODEL:-qwen2.5:14b}"
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
 
 # Best qwen2.5 tag for this much unified memory, leaving headroom for Whisper
 # (~1.6 GB), Kokoro (~0.3 GB), and the OS.
@@ -830,11 +836,11 @@ elif (( RAM_GB >= 12 )); then RECOMMEND="qwen2.5:7b"
 else                          RECOMMEND="qwen2.5:3b"
 fi
 
-NEED="$(llm_needs_gb "$LLM_MODEL")"
+NEED="$(llm_needs_gb "$LOCAT_LLM_MODEL")"
 if (( NEED == 0 )); then
-  warn "configured LLM '${LLM_MODEL}': size unknown — can't judge fit"
+  warn "configured LLM '${LOCAT_LLM_MODEL}': size unknown — can't judge fit"
 elif (( NEED + 4 > RAM_GB )); then
-  warn "configured LLM '${LLM_MODEL}' wants ~${NEED} GB + overhead — tight on ${RAM_GB} GB; consider ${RECOMMEND}"
+  warn "configured LLM '${LOCAT_LLM_MODEL}' wants ~${NEED} GB + overhead — tight on ${RAM_GB} GB; consider ${RECOMMEND}"
 fi
 
 echo
@@ -861,9 +867,10 @@ if (( VERBOSE )); then
   echo
   echo "doctor: hardware profile"
   print_hardware_profile
-  if [[ -d models ]]; then
-    echo "  ./models:"
-    du -sh models/*/ 2>/dev/null | awk '{printf "     %-8s %s\n", $1, $2}' || :
+  if [[ -d "$LOCAT_MODEL_DIR" ]]; then
+    echo "  models (LOCAT_MODEL_DIR=$LOCAT_MODEL_DIR):"
+    du -sh "$LOCAT_MODEL_DIR"/*/ 2>/dev/null \
+      | awk '{n=split($2,p,"/"); printf "     %-8s %s\n", $1, p[n-1]"/"}' || :
   fi
 
   echo "  tooling:"
