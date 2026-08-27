@@ -53,11 +53,17 @@ Usage:
 Options:
   -v, --verbose            full capability matrix + model catalogs
   -i, --interactive        guided model picker (the only mode that writes)
+  -a, --all                do not trim the LLM catalog to what this machine
+                           can actually run
   -h, --help               this help
 
 Environment:
-  LOCAT_DOCTOR_RAM_GB=<n>        pretend the machine has <n> GB RAM (preview what
+  LOCAT_DOCTOR_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
                            doctor would say on a smaller machine)
+  LOCAT_CATALOG_MAX_AGE_DAYS=<n>
+                           refetch the ollama.com catalog when the cache is
+                           older than <n> days (default 7; 0 never fetches)
+  LOCAT_CATALOG_LIMIT=<n>  LLM rows to keep, best-fitting first (default 60)
 
 Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
 Silicon; elsewhere the CPU engines (faster-whisper/Moonshine) are the
@@ -69,20 +75,27 @@ EOF
 
 VERBOSE=0
 INTERACTIVE=0
-case "${1:-}" in
-  -v|--verbose)     VERBOSE=1 ;;
-  -i|--interactive) INTERACTIVE=1 ;;
-  -h|--help)        usage; exit 0 ;;
-  "")               ;;
-  *) echo "doctor: unknown option '$1' (try ./doctor.sh -h)" >&2; exit 1 ;;
-esac
+SHOW_ALL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose)     VERBOSE=1 ;;
+    -i|--interactive) INTERACTIVE=1 ;;
+    -a|--all)         SHOW_ALL=1 ;;
+    -h|--help)        usage; exit 0 ;;
+    "")               ;;
+    *) echo "doctor: unknown option '$1' (try ./doctor.sh -h)" >&2; exit 1 ;;
+  esac
+  shift
+done
 
 pass() { echo "  ✅ $*"; }
 warn() { echo "  ⚠️  $*"; }
 
-# --- Curated model data ------------------------------------------------------
-# Ollama has no catalog API (its library is a website), so doctor ships a
-# hand-picked, offline-usable table instead. tag|~GB in memory (q4)|note
+# --- Model data --------------------------------------------------------------
+# ollama.com is a website, not an API, so scripts/fetch_catalog.py scrapes it
+# into a cache that load_catalog() reads over the seed array below. The seed is
+# the offline fallback — a fresh clone with no network still gets a usable list.
+# tag|~GB in memory (q4)|note|active GB (MoE only — speed uses this, RAM uses ~GB)
 LLM_CATALOG=(
   "qwen2.5:0.5b|1|"
   "qwen2.5:1.5b|1|"
@@ -117,6 +130,12 @@ LLM_CATALOG=(
   "deepseek-r1:14b|10|reasoning: thinks before speaking"
   "deepseek-r1:32b|20|reasoning: thinks before speaking"
   "deepseek-r1:70b|43|reasoning: thinks before speaking"
+  "nemotron-3-nano:4b|3|"
+  "nemotron-3-nano:30b|25|MoE, 3B active|3"
+  "nemotron-3.5-lightning:30b|26|MoE, 3B active|3"
+  "nemotron-cascade-2:30b|25|MoE, 3B active|3"
+  "nemotron:70b|43|"
+  "nemotron-3-super:120b|87|MoE, 12B active|12"
 )
 
 # STT engine tables. services.py builds whichever engine LOCAT_STT_ENGINE selects.
@@ -157,6 +176,20 @@ DEFAULT_VOICE="af_heart"
 PIPER_VOICES=(en_US-lessac-medium en_US-amy-medium en_US-ryan-high en_GB-alba-medium en_GB-northern_english_male-medium)
 
 # Approximate in-memory size (GB, q4 quant) of an LLM tag; 0 = unknown.
+# GB streamed per token for a tag: the catalog's active field when set (MoE),
+# otherwise its total size. Free-typed tags fall back to llm_needs_gb.
+llm_active_gb() {
+  local entry act
+  for entry in "${LLM_CATALOG[@]}"; do
+    if [[ "${entry%%|*}" == "$1" ]]; then
+      act="$(echo "$entry" | cut -d'|' -f4)"
+      [[ -n "$act" ]] && { echo "$act"; return; }
+      break
+    fi
+  done
+  llm_needs_gb "$1"
+}
+
 llm_needs_gb() {
   local entry
   for entry in "${LLM_CATALOG[@]}"; do
@@ -209,6 +242,75 @@ fi
 RAM_GB="${LOCAT_DOCTOR_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
 
+# --- Live LLM catalog --------------------------------------------------------
+# ollama's library changes constantly, so the catalog is fetched and cached
+# rather than hand-maintained. Refresh is weekly and only on the modes that
+# actually show the catalog — never in the background, never on a bare run.
+CATALOG_CACHE="${LOCAT_MODEL_DIR}/.llm-catalog"
+CATALOG_MAX_AGE="${LOCAT_CATALOG_MAX_AGE_DAYS:-7}"   # 0 disables fetching entirely
+CATALOG_LIMIT="${LOCAT_CATALOG_LIMIT:-60}"           # rows kept, most-pulled first
+CATALOG_STATUS=""
+
+refresh_catalog() {
+  (( CATALOG_MAX_AGE == 0 )) && return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  # -mtime +N is "older than N+1 days", so subtract one to mean "older than AGE".
+  if [[ -s "$CATALOG_CACHE" ]] \
+     && [[ -z "$(find "$CATALOG_CACHE" -mtime +$(( CATALOG_MAX_AGE - 1 )) 2>/dev/null)" ]]; then
+    return 0
+  fi
+  echo "doctor: refreshing LLM catalog from ollama.com (every ${CATALOG_MAX_AGE} days)…"
+  local tmp; tmp="$(mktemp)"
+  if python3 "$REPO/scripts/fetch_catalog.py" >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mkdir -p "$(dirname "$CATALOG_CACHE")" && mv "$tmp" "$CATALOG_CACHE"
+  else
+    rm -f "$tmp"
+    warn "catalog refresh failed (offline?) — using what we already have"
+  fi
+}
+
+# Replace the seed array with the cache, keeping the most-pulled models that fit
+# this machine. --all keeps everything, including models too big to run.
+load_catalog() {
+  [[ -s "$CATALOG_CACHE" ]] || { CATALOG_STATUS="built-in list"; return 0; }
+  local line gb fam seen_fams="" kept=() n=0 configured="${LOCAT_LLM_MODEL:-}"
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    gb="$(echo "$line" | cut -d'|' -f2)"
+    [[ "$gb" =~ ^[0-9]+$ ]] || continue
+    if (( SHOW_ALL == 0 )); then
+      (( gb + 4 > RAM_GB )) && continue
+      (( n >= CATALOG_LIMIT )) && continue
+      # Cap size variants per family. Without this, a handful of popular
+      # families spend the whole budget on their own 7 sizes and the list
+      # shows ~11 distinct models. Cache order is largest-first, so the
+      # survivors are the biggest that still fit.
+      fam="${line%%:*}"
+      case " $seen_fams " in
+        *" $fam:$fam "*) continue ;;
+        *" $fam "*) seen_fams="$seen_fams $fam:$fam" ;;
+        *) seen_fams="$seen_fams $fam" ;;
+      esac
+    fi
+    kept+=("$line"); n=$(( n + 1 ))
+  done < "$CATALOG_CACHE"
+  (( ${#kept[@]} )) || { CATALOG_STATUS="built-in list"; return 0; }
+  # Whatever is configured must be judgeable even if it missed the popularity cut.
+  if [[ -n "$configured" ]] && ! printf '%s\n' "${kept[@]}" | grep -q "^${configured}|"; then
+    line="$(grep -m1 "^${configured}|" "$CATALOG_CACHE" 2>/dev/null || :)"
+    [[ -n "$line" ]] && kept+=("$line")
+  fi
+  LLM_CATALOG=( "${kept[@]}" )
+  local days
+  days="$(( ( $(date +%s) - $(catalog_mtime) ) / 86400 ))"
+  CATALOG_STATUS="ollama.com, $( (( days <= 0 )) && echo "fetched today" || echo "${days}d old" )"
+}
+
+catalog_mtime() { stat -f %m "$CATALOG_CACHE" 2>/dev/null || stat -c %Y "$CATALOG_CACHE" 2>/dev/null || echo 0; }
+
+if (( VERBOSE || INTERACTIVE )); then refresh_catalog; fi
+load_catalog
+
 # Memory bandwidth (GB/s) — decode speed of a q4 LLM is bandwidth-bound, so
 # this single number predicts tokens/sec. Apple Silicon's unified memory is
 # well documented per chip; elsewhere assume dual-channel DDR-class bandwidth
@@ -242,12 +344,14 @@ fi
 unset _i _e
 
 # Rough decode speed for a q4 model of $1 GB on this chip's bandwidth.
+# $1 = the GB actually streamed per token. For dense models that is the whole
+# model; for MoE it is only the active experts, so pass the catalog's 4th field.
 est_tok_s() { echo $(( BW / ( $1 > 0 ? $1 : 1 ) )); }
 
 # Fit verdict for an LLM of $1 GB: prints "rank|verdict" (rank sorts: 0 best).
 # RAM headroom mirrors the combo math: ~2 GB STT/TTS + ~4 GB OS.
-llm_verdict() {
-  local gb=$1 tok; tok="$(est_tok_s "$gb")"
+llm_verdict() {  # $1 = total GB (RAM), $2 = active GB (speed; defaults to $1)
+  local gb=$1 tok; tok="$(est_tok_s "${2:-$1}")"
   if   (( gb + 4 > RAM_GB )); then echo "3|❌ too big"
   elif (( tok < 8 ));          then echo "2|🐢 too slow for voice"
   elif (( gb + 6 > RAM_GB ));  then echo "1|⚠️  tight fit"
@@ -298,13 +402,14 @@ for m in ("moonshine_voice", "piper", "pyaudio"):
 
 # Catalog rows, best-fitting first: "rank|gb|tag|tok/s|verdict|installed|note"
 sorted_catalog_rows() {
-  local entry tag gb note tok rv rank verdict inst
+  local entry tag gb note act tok rv rank verdict inst
   for entry in "${LLM_CATALOG[@]}"; do
     tag="$(echo "$entry" | cut -d'|' -f1)"
     gb="$(echo "$entry"  | cut -d'|' -f2)"
     note="$(echo "$entry" | cut -d'|' -f3)"
-    tok="$(est_tok_s "$gb")"
-    rv="$(llm_verdict "$gb")"; rank="${rv%%|*}"; verdict="${rv#*|}"
+    act="$(echo "$entry" | cut -d'|' -f4)"; act="${act:-$gb}"
+    tok="$(est_tok_s "$act")"
+    rv="$(llm_verdict "$gb" "$act")"; rank="${rv%%|*}"; verdict="${rv#*|}"
     inst=""; llm_installed "$tag" && inst="(installed)"
     echo "$rank|$gb|$tag|$tok|$verdict|$inst|$note"
   done | sort -t'|' -k1,1n -k2,2rn
@@ -321,7 +426,7 @@ print_catalog_table() {  # $1 = "numbered" to prefix row numbers (for -i)
     inst="$(echo "$row" | cut -d'|' -f6)"; note="$(echo "$row" | cut -d'|' -f7)"
     prefix="   "
     [[ "${1:-}" == "numbered" ]] && prefix="$(printf '%3d)' "$i")"
-    printf "  %s %-18s ~%2d GB  ~%3d tok/s  %-22s %-12s %s\n" \
+    printf "  %s %-26s ~%2d GB  ~%3d tok/s  %-22s %-12s %s\n" \
       "$prefix" "$tag" "$gb" "$tok" "$verdict" "$inst" "$note"
     IFS=$'\n'
   done
@@ -676,7 +781,7 @@ if (( INTERACTIVE )); then
 
   # --- Combo verdict --------------------------------------------------------
   echo "doctor: combo check — STT ${CHOSEN_STT_ENGINE}/${CHOSEN_STT_MODEL} + LLM ${CHOSEN_LLM} + TTS ${CHOSEN_TTS_ENGINE}/${CHOSEN_VOICE}"
-  TOK="$(est_tok_s "$LLM_GB")"
+  TOK="$(est_tok_s "$(llm_active_gb "$CHOSEN_LLM")")"
   TOTAL=$(( LLM_GB + STT_GB + 1 ))   # +1 ≈ TTS (Kokoro 0.3 / Piper 0.1) rounded up
   SUGGEST="$(sorted_catalog_rows | awk -F'|' '$1==0{print $3; exit}')"
   APPROVED=1
@@ -887,7 +992,7 @@ if (( VERBOSE )); then
   echo
   echo "~ LLM catalog ~"
   echo
-  echo "  Ollama (local server · registry: ollama.com/library)"
+  echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; --all for everything"))"
   print_catalog_table
   echo "  (pick interactively with ./doctor.sh -i)"
   echo
