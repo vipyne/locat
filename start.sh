@@ -7,8 +7,7 @@
 # subsequent starts are instant; stop it with ./stop.sh.
 #
 # Usage:
-#   ./start.sh                     # SmallWebRTC transport (default) — browser
-#   ./start.sh -t moq              # MoQ transport — browser, lowest latency
+#   ./start.sh                     # MoQ transport (default) — browser, lowest latency
 #   ./start.sh -t headphones       # local audio hardware (use headphones! 🎧)
 #   ./start.sh -h                  # show this help
 #   LOCAT_LLM_MODEL=llama3 ./start.sh    # use a different local model
@@ -25,7 +24,7 @@ LOCAT_REPO_ROOT="$REPO"
 
 usage() { grep '^#   ' "$0" | sed 's/^#   //'; }
 
-TRANSPORT="webrtc"
+TRANSPORT="moq"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--transport) TRANSPORT="${2:-}"; shift 2 || shift ;;
@@ -35,8 +34,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$TRANSPORT" in
-  moq|webrtc|headphones) ;;
-  *) echo "start: unknown transport '$TRANSPORT' — valid: webrtc (default), moq, headphones" >&2; exit 1 ;;
+  moq|headphones) ;;
+  *) echo "start: unknown transport '$TRANSPORT' — valid: moq (default), headphones" >&2; exit 1 ;;
 esac
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
@@ -68,10 +67,6 @@ case "$TRANSPORT" in
     echo "start: Ollama ready."
     echo "       ▶ Open  http://localhost:${LOCAT_WEB_PORT}  — choose 'Media over QUIC' in the"
     echo "         top-left dropdown, allow the mic, and Connect."
-    ;;
-  webrtc)
-    CMD=(uv run python bot_web.py --host localhost --port "${LOCAT_WEB_PORT}")
-    echo "start: Ollama ready."
     ;;
   headphones)
     CMD=(uv run bot.py)

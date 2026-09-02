@@ -7,7 +7,7 @@ dependencies = [
     "moq-rs>=0.3.2,<0.4.0",
     "num2words>=0.5.14",
     "pipecat-ai-prebuilt>=1.0.5",
-    "pipecat-ai[kokoro,moq,silero,webrtc,whisper]>=1.7.0",
+    "pipecat-ai[kokoro,moq,silero,whisper]>=1.7.0",
     # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
     # platforms default to faster-whisper (CPU) instead (see services.py).
     "pipecat-ai[mlx-whisper]>=1.7.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -25,9 +25,9 @@ piper = ["pipecat-ai[piper]"]
 # bot.py (LocalAudioTransport) only. PyAudio ships wheels for Windows *only*, so
 # on macOS/Linux it compiles against PortAudio — the one dependency here that
 # needs a C toolchain. Keeping it out of the base install means a bare
-# `uv sync` works on any machine, and the browser front-ends (bot_web.py,
-# bot_moq.py) run without it; they get echo cancellation from the browser
-# anyway. See README "Requirements".
+# `uv sync` works on any machine, and the browser front-end (bot_moq.py)
+# runs without it; it gets echo cancellation from the browser anyway.
+# See README "Requirements".
 #   brew install portaudio && uv sync --extra local-audio
 local-audio = ["pyaudio>=0.2.14"]
 
