@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -33,8 +34,15 @@ def closed_port() -> int:
         return s.getsockname()[1]
 
 
-def run_locat(command: str, state_dir: Path, ollama_host: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "LOCAT_STATE_DIR": str(state_dir), "OLLAMA_HOST": ollama_host}
+def run_locat(
+    command: str, state_dir: Path, ollama_host: str, **extra_env: str
+) -> subprocess.CompletedProcess:
+    env = {
+        **os.environ,
+        "LOCAT_STATE_DIR": str(state_dir),
+        "OLLAMA_HOST": ollama_host,
+        **extra_env,
+    }
     return subprocess.run(
         [LOCAT, command], cwd=REPO, env=env, capture_output=True, text=True, timeout=120
     )
@@ -92,6 +100,46 @@ def test_status_reports_foreign_ollama_untouched(tmp_path):
         assert server.poll() is None
     finally:
         server.kill()
+
+
+def test_index_rag_empty_data_dir_prints_hint_and_exits_zero(tmp_path):
+    data_dir = tmp_path / "docs"
+    result = run_locat(
+        "index-rag",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_RAG_DATA_DIR=str(data_dir),
+        LOCAT_RAG_INDEX_DIR=str(tmp_path / "idx"),
+    )
+    assert result.returncode == 0
+    assert str(data_dir) in result.stdout
+    assert data_dir.is_dir()
+
+
+def test_status_rag_line_without_index(tmp_path):
+    result = run_locat(
+        "status",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_RAG_INDEX_DIR=str(tmp_path / "idx"),
+    )
+    assert result.returncode == 0
+    assert "rag      no index (run ./locat.sh index-rag)" in result.stdout
+
+
+def test_status_rag_line_with_index(tmp_path):
+    import rag
+
+    index_dir = tmp_path / "idx"
+    rag.index(REPO / "tests" / "fixtures", index_dir, rag.FakeEmbedder())
+    result = run_locat(
+        "status",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_RAG_INDEX_DIR=str(index_dir),
+    )
+    assert result.returncode == 0
+    assert re.search(r"rag      index: \d+ chunks from 3 files", result.stdout)
 
 
 def test_stop_leaves_foreign_ollama_alone(tmp_path):

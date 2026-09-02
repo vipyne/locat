@@ -59,6 +59,11 @@ model_lines() {
     || echo "         (could not resolve models — run 'uv sync' and retry)"
 }
 
+rag_line() {
+  uv run python rag.py stats --bare 2>/dev/null \
+    || echo "no index (run ./locat.sh index-rag)"
+}
+
 cmd_start() {
   local transport="moq"
   while [[ $# -gt 0 ]]; do
@@ -184,7 +189,7 @@ cmd_status() {
   fi
 
   model_lines --bare
-  echo "rag      no index (run ./locat.sh index-rag)"
+  echo "rag      $(rag_line)"
 }
 
 CMD="${1:-}"
@@ -193,7 +198,7 @@ case "$CMD" in
   start)      cmd_start "$@" ;;
   stop)       cmd_stop ;;
   status)     cmd_status ;;
-  index-rag)  echo "index-rag: rag not built yet (Phase 1)" >&2; exit 1 ;;
+  index-rag)  exec uv run python rag.py index ;;
   configure)  exec ./configure.sh "$@" ;;
   models)     exec uv run python scripts/print_models.py "$@" ;;
   -h|--help|help|"") usage ;;

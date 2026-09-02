@@ -272,6 +272,11 @@ not something ollama reads.
 | `LOCAT_LLM_MODEL` | `qwen2.5:14b` | Ollama model tag. Same string `run_ollama.sh` pulls and the bot serves. Smaller/faster: `qwen2.5:7b`. |
 | `LOCAT_OLLAMA_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible Ollama endpoint (note the trailing `/v1`). The RAG embedder talks to the same host minus `/v1`. |
 | `LOCAT_EMBED_MODEL` | `nomic-embed-text` | Ollama model tag for RAG embeddings. Pull it with `ollama pull nomic-embed-text`. |
+| `LOCAT_RAG_DATA_DIR` | `./data` | The documents to index (`.txt`/`.md`/`.pdf`) — put files here, then `./locat.sh index-rag`. Absolute, `~`, or relative-to-repo. |
+| `LOCAT_RAG_INDEX_DIR` | `$LOCAT_MODEL_DIR/rag-index` | Where the built index lives (`chunks.jsonl`, `embeddings.npy`, `manifest.json`). |
+| `LOCAT_RAG_TOP_K` | `4` | Retrieved chunks injected into the LLM context per user turn. |
+| `LOCAT_RAG_CHUNK_TOKENS` | `500` | Chunk budget in whitespace-split words. |
+| `LOCAT_RAG_CHUNK_OVERLAP` | `50` | Words repeated between consecutive chunks. |
 | `LOCAT_STT_ENGINE` | `whisper_mlx`* | STT engine `services.py` builds: `whisper_mlx`, `faster_whisper`, or `moonshine` (`uv sync --extra moonshine`). *Default is `faster_whisper` on non-Apple-Silicon machines. |
 | `LOCAT_WHISPER_MODEL` | `LARGE_V3_TURBO` | `MLXModel` member: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`. Must match what you prefetched. |
 | `LOCAT_FASTER_WHISPER_MODEL` | `DISTIL_MEDIUM_EN` | faster-whisper model (when `LOCAT_STT_ENGINE=faster_whisper`); downloads on first use. |

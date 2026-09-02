@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -215,3 +216,91 @@ def retrieve(query: str, k: int, index_dir: Path, embedder: Embedder) -> list[Ch
         )
         for i in np.argsort(scores)[::-1][:k]
     ]
+
+
+def _preflight_embed_model(model: str, api_url: str) -> None:
+    """Fail fast with the exact remedy if Ollama is down or the embed model
+    isn't pulled — mirrors bot._preflight_llm."""
+    try:
+        response = httpx.get(f"{api_url}/api/tags", timeout=5)
+        response.raise_for_status()
+        available = {str(m.get("name", "")) for m in response.json().get("models", [])}
+    except (httpx.HTTPError, OSError) as exc:
+        sys.exit(
+            f"\n✖ Cannot reach Ollama at {api_url}\n"
+            f"  Start it first:  ./locat.sh start   (or: ollama serve)\n"
+            f"  Details: {exc}\n"
+        )
+    if not any(model == m or model.split(":")[0] == m.split(":")[0] for m in available):
+        sys.exit(
+            f"\n✖ Embedding model '{model}' is not available in Ollama at {api_url}\n"
+            f"  Pull it:  ollama pull {model}\n"
+        )
+
+
+def _cli_index() -> None:
+    import config
+
+    data_dir = Path(config.rag_data_dir())
+    index_dir = Path(config.rag_index_dir())
+    data_dir.mkdir(parents=True, exist_ok=True)
+    if not any(p.is_file() for p in data_dir.rglob("*")):
+        print(
+            f"no documents yet — put .txt/.md/.pdf files in {data_dir} "
+            "and rerun ./locat.sh index-rag"
+        )
+        return
+    _preflight_embed_model(config.embed_model(), config.ollama_api_url())
+    stats = index(
+        data_dir,
+        index_dir,
+        OllamaEmbedder(config.ollama_api_url(), config.embed_model()),
+        chunk_tokens=config.rag_chunk_tokens(),
+        overlap=config.rag_chunk_overlap(),
+    )
+    print(
+        f"indexed {stats.chunks} chunks from {stats.files} files "
+        f"with {stats.embed_model} → {index_dir}"
+    )
+
+
+def _cli_stats(bare: bool) -> None:
+    import config
+
+    index_dir = Path(config.rag_index_dir())
+    manifest_path = index_dir / "manifest.json"
+    if not manifest_path.is_file():
+        print("no index (run ./locat.sh index-rag)")
+        return
+    manifest = json.loads(manifest_path.read_text())
+    chunks = len((index_dir / "chunks.jsonl").read_text().splitlines())
+    files = manifest.get("files", {})
+    print(f"index: {chunks} chunks from {len(files)} files ({config.rag_data_dir()})")
+    if bare:
+        return
+    print(f"index dir:   {index_dir}")
+    print(f"embed model: {manifest.get('embed_model')}")
+    print(f"chunking:    {manifest.get('chunk_tokens')} tokens, {manifest.get('overlap')} overlap")
+    for path in sorted(files):
+        print(f"  {path}")
+
+
+def _main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="offline document index for locat")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+    subcommands.add_parser("index", help="rebuild the index from LOCAT_RAG_DATA_DIR")
+    stats_parser = subcommands.add_parser("stats", help="print index summary")
+    stats_parser.add_argument(
+        "--bare", action="store_true", help="one status line, for ./locat.sh status"
+    )
+    args = parser.parse_args()
+    if args.command == "index":
+        _cli_index()
+    else:
+        _cli_stats(args.bare)
+
+
+if __name__ == "__main__":
+    _main()

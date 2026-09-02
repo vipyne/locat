@@ -47,17 +47,12 @@ except Exception:  # python-dotenv is a dep, but never hard-fail on config impor
     pass
 
 
-def _resolve_model_dir() -> Path:
-    """Absolute path of the one directory holding every downloaded model.
-
-    ``LOCAT_MODEL_DIR`` (default ``./models``) can point anywhere on the machine
-    — an external disk, a shared cache, whatever. Relative paths resolve against
-    the REPO ROOT rather than the process's cwd, so the value means the same
-    thing no matter where the bot was launched from, and a leading ``~`` is
-    expanded. ``scripts/model_dir.sh`` implements the identical rules for the
-    shell scripts that cannot import this module.
+def _resolve_repo_path(raw: str) -> Path:
+    """Shared resolution rules for every LOCAT_* directory var: a leading ``~``
+    is expanded, and relative paths resolve against the REPO ROOT rather than
+    the process's cwd, so the value means the same thing no matter where the
+    bot was launched from.
     """
-    raw = os.getenv("LOCAT_MODEL_DIR", "").strip() or DEFAULT_MODEL_DIR
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = REPO_ROOT / path
@@ -67,6 +62,17 @@ def _resolve_model_dir() -> Path:
     # scripts/model_dir.sh, which cannot resolve symlinks for a path that does
     # not exist yet. Collapsing "." / ".." textually is all that is needed.
     return Path(os.path.normpath(path))
+
+
+def _resolve_model_dir() -> Path:
+    """Absolute path of the one directory holding every downloaded model.
+
+    ``LOCAT_MODEL_DIR`` (default ``./models``) can point anywhere on the machine
+    — an external disk, a shared cache, whatever. ``scripts/model_dir.sh``
+    implements the identical resolution rules for the shell scripts that cannot
+    import this module.
+    """
+    return _resolve_repo_path(os.getenv("LOCAT_MODEL_DIR", "").strip() or DEFAULT_MODEL_DIR)
 
 
 MODELS_DIR = _resolve_model_dir()
@@ -160,6 +166,10 @@ DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 DEFAULT_LLM_MODEL = "qwen2.5:14b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
+DEFAULT_RAG_DATA_DIR = "data"
+DEFAULT_RAG_TOP_K = 4
+DEFAULT_RAG_CHUNK_TOKENS = 500
+DEFAULT_RAG_CHUNK_OVERLAP = 50
 DEFAULT_KOKORO_VOICE = "af_heart"
 DEFAULT_GREETING = (
     "Hi. I'm your private, offline financial thinking partner. "
@@ -314,6 +324,39 @@ def embed_model() -> str:
     return _get("LOCAT_EMBED_MODEL", DEFAULT_EMBED_MODEL)
 
 
+def rag_data_dir() -> str:
+    """Directory of the documents to index (LOCAT_RAG_DATA_DIR, default ``./data``).
+
+    Drop ``.txt``/``.md``/``.pdf`` files here, then ``./locat.sh index-rag``.
+    Resolved like ``LOCAT_MODEL_DIR``: absolute, ``~``, or relative to the repo
+    root.
+    """
+    return str(_resolve_repo_path(_get("LOCAT_RAG_DATA_DIR", DEFAULT_RAG_DATA_DIR)))
+
+
+def rag_index_dir() -> str:
+    """Where the built RAG index lives (LOCAT_RAG_INDEX_DIR, default
+    ``$LOCAT_MODEL_DIR/rag-index``): chunks.jsonl + embeddings.npy +
+    manifest.json, all written by ``./locat.sh index-rag``.
+    """
+    return str(_resolve_repo_path(_get("LOCAT_RAG_INDEX_DIR", str(MODELS_DIR / "rag-index"))))
+
+
+def rag_top_k() -> int:
+    """Retrieved chunks injected into context per user turn (LOCAT_RAG_TOP_K, default 4)."""
+    return _get_int("LOCAT_RAG_TOP_K", DEFAULT_RAG_TOP_K)
+
+
+def rag_chunk_tokens() -> int:
+    """Chunk budget in whitespace-split words (LOCAT_RAG_CHUNK_TOKENS, default 500)."""
+    return _get_int("LOCAT_RAG_CHUNK_TOKENS", DEFAULT_RAG_CHUNK_TOKENS)
+
+
+def rag_chunk_overlap() -> int:
+    """Words repeated between consecutive chunks (LOCAT_RAG_CHUNK_OVERLAP, default 50)."""
+    return _get_int("LOCAT_RAG_CHUNK_OVERLAP", DEFAULT_RAG_CHUNK_OVERLAP)
+
+
 def kokoro_voice() -> str:
     """Kokoro voice id (default ``af_heart``).
 
@@ -376,6 +419,12 @@ def _get_float(name: str, default: float) -> float:
     """Return env var ``name`` parsed as float, or ``default`` when unset/blank."""
     raw = os.getenv(name, "").strip()
     return float(raw) if raw else default
+
+
+def _get_int(name: str, default: int) -> int:
+    """Return env var ``name`` parsed as int, or ``default`` when unset/blank."""
+    raw = os.getenv(name, "").strip()
+    return int(raw) if raw else default
 
 
 def vad_confidence() -> float:
