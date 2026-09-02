@@ -10,7 +10,7 @@ Run:
     ./start.sh
     # open http://localhost:7860, choose "Media over QUIC" in the dropdown, allow the mic, Connect.
 
-Reuses bot.py's exact pipeline/builders (VADProcessor + Whisper/Ollama/Kokoro + SpokenTextFilter);
+Reuses the shared pipeline from pipeline.py (VADProcessor + Whisper/Ollama/Kokoro);
 the ONLY difference from bot_web.py is the transport (MOQParams) and MoQ's event-handler shapes.
 """
 
@@ -20,29 +20,15 @@ import config
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.frames.frames import TTSSpeakFrame
-from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-)
 
-from prompts.financial_advisor import SYSTEM_PROMPT
-
-# Reuse the exact offline builders + helpers from the CLI bot — one brain, three transports.
-from bot import (
-    _configure_logging,
-    _preflight_llm,
-    build_vad_processor,
-)
-
-# STT/LLM/TTS come from services.py (engine choice via LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE).
-from services import build_llm, build_stt, build_tts
+from bot import _configure_logging, _preflight_llm
+from pipeline import build_pipeline
 
 load_dotenv(override=True)
 
@@ -55,26 +41,8 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     """Assemble and run the pipeline for one connected browser client (over MoQ).
     """
-    vad = build_vad_processor()
-    stt = build_stt()
-    llm = build_llm()
-    tts = build_tts()
-    context = LLMContext(messages=[{"role": "system", "content": SYSTEM_PROMPT}])
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
-
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            vad,
-            stt,
-            user_aggregator,
-            llm,
-            tts,
-            transport.output(),
-            assistant_aggregator,
-        ]
-    )
-    worker = PipelineWorker(pipeline, params=PipelineParams())
+    built = build_pipeline(transport)
+    worker = PipelineWorker(built.pipeline, params=PipelineParams())
 
     # NOTE: MoQ's handlers differ from SmallWebRTC's — they receive only the transport
     # (no client argument).
