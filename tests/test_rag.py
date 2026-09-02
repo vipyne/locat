@@ -1,6 +1,11 @@
+import json
 from pathlib import Path
 
-from rag import chunk_text, extract
+import httpx
+import numpy as np
+import pytest
+
+from rag import FakeEmbedder, OllamaEmbedder, chunk_text, extract
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -84,3 +89,51 @@ def test_extract_unknown_extension_is_skipped(tmp_path):
     docx = tmp_path / "note.docx"
     docx.write_text("not a supported format")
     assert extract(docx) == []
+
+
+def test_fake_embedder_shape_and_dtype():
+    vectors = FakeEmbedder().embed(["hello", "world"])
+    assert vectors.shape == (2, FakeEmbedder.dim)
+    assert vectors.dtype == np.float32
+
+
+def test_fake_embedder_is_deterministic():
+    a = FakeEmbedder().embed(["hello", "world"])
+    b = FakeEmbedder().embed(["hello", "world"])
+    assert np.array_equal(a, b)
+
+
+def test_fake_embedder_distinguishes_texts():
+    vectors = FakeEmbedder().embed(["hello", "world"])
+    assert not np.array_equal(vectors[0], vectors[1])
+
+
+def test_fake_embedder_empty_input():
+    assert FakeEmbedder().embed([]).shape == (0, FakeEmbedder.dim)
+
+
+def test_ollama_embedder_request_and_response():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"embeddings": [[0.1, 0.2], [0.3, 0.4]]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    embedder = OllamaEmbedder("http://localhost:11434", "nomic-embed-text", client=client)
+    vectors = embedder.embed(["first text", "second text"])
+
+    assert seen["url"] == "http://localhost:11434/api/embed"
+    assert seen["body"] == {"model": "nomic-embed-text", "input": ["first text", "second text"]}
+    assert vectors.dtype == np.float32
+    assert vectors.shape == (2, 2)
+
+
+def test_ollama_embedder_raises_on_http_error():
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, text="boom"))
+    )
+    embedder = OllamaEmbedder("http://localhost:11434", "nomic-embed-text", client=client)
+    with pytest.raises(httpx.HTTPStatusError):
+        embedder.embed(["text"])

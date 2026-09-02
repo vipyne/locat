@@ -159,6 +159,7 @@ DEFAULT_MOONSHINE_MODEL = "SMALL_STREAMING"
 DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 DEFAULT_LLM_MODEL = "qwen2.5:14b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_KOKORO_VOICE = "af_heart"
 DEFAULT_GREETING = (
     "Hi. I'm your private, offline financial thinking partner. "
@@ -292,6 +293,25 @@ def ollama_base_url() -> str:
     Note the trailing ``/v1``: the OpenAI-compat path, not the native API root.
     """
     return _get("LOCAT_OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)
+
+
+def ollama_api_url() -> str:
+    """Native Ollama API root (``/api/embed``, ``/api/tags``).
+
+    Derived from ``ollama_base_url()`` by dropping the OpenAI-compat ``/v1``
+    suffix — one host var covers both APIs.
+    """
+    return ollama_base_url().rstrip("/").removesuffix("/v1")
+
+
+def embed_model() -> str:
+    """Ollama model tag for RAG embeddings (LOCAT_EMBED_MODEL, default
+    ``nomic-embed-text``).
+
+    Served by the same Ollama instance as the LLM; pull it with
+    ``ollama pull nomic-embed-text``.
+    """
+    return _get("LOCAT_EMBED_MODEL", DEFAULT_EMBED_MODEL)
 
 
 def kokoro_voice() -> str:

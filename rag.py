@@ -1,9 +1,13 @@
 """Offline RAG over the user's documents. Bot code only calls index() / retrieve()."""
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
+import httpx
+import numpy as np
 from loguru import logger
 from pypdf import PdfReader
 
@@ -27,6 +31,42 @@ def extract(path: Path) -> list[PageText]:
         ]
     logger.info(f"skipping {source_path}: unsupported extension")
     return []
+
+
+class Embedder(Protocol):
+    def embed(self, texts: list[str]) -> np.ndarray: ...
+
+
+class OllamaEmbedder:
+    """Embeds via the native Ollama API: POST {base_url}/api/embed."""
+
+    def __init__(self, base_url: str, model: str, client: httpx.Client | None = None):
+        self._url = f"{base_url.rstrip('/')}/api/embed"
+        self._model = model
+        self._client = client or httpx.Client(timeout=120.0)
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        response = self._client.post(
+            self._url, json={"model": self._model, "input": texts}
+        )
+        response.raise_for_status()
+        return np.asarray(response.json()["embeddings"], dtype=np.float32)
+
+
+class FakeEmbedder:
+    """Deterministic offline stand-in for tests: vector seeded from sha256(text)."""
+
+    dim = 32
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self.dim), dtype=np.float32)
+        rows = []
+        for text in texts:
+            seed = int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "big")
+            rows.append(np.random.default_rng(seed).standard_normal(self.dim))
+        vectors = np.asarray(rows, dtype=np.float32)
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
 
 
 def chunk_text(text: str, chunk_tokens: int = 500, overlap: int = 50) -> list[str]:
