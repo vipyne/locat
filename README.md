@@ -247,6 +247,30 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 
 ---
 
+## RAG (documents)
+
+The bot can ground its answers in your own documents — fully offline, no vector
+database. Drop `.txt`, `.md`, or `.pdf` files into `./data/`, then:
+
+```bash
+ollama pull nomic-embed-text   # one-time, while online
+./locat.sh index-rag
+```
+
+On every user turn the bot embeds the query, picks the `LOCAT_RAG_TOP_K` best
+chunks by cosine similarity, and injects them into the LLM context as a single
+system message ("Relevant excerpts from the user's documents …") that names
+each source file and page so the model can cite them. `./locat.sh status`
+shows the index; after adding or editing documents, re-run
+`./locat.sh index-rag` (it rebuilds from scratch). With no index the bot just
+runs without document grounding.
+
+Bot code reaches all of this through exactly two functions, `rag.index(...)`
+and `rag.retrieve(...)` — everything behind them (pypdf extraction, chunking,
+Ollama embeddings, numpy cosine) is an implementation detail of `rag.py`.
+
+---
+
 ## Configuration
 
 Every knob is an environment variable (read from `.env` if present). All are

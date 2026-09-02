@@ -488,6 +488,17 @@ llm_installed() {
   return 1
 }
 
+# The embed model is usually configured bare ("nomic-embed-text") while the
+# store tags it ":latest" — match either form, like rag.py's preflight does.
+EMBED_MODEL="${LOCAT_EMBED_MODEL:-nomic-embed-text}"
+embed_installed() {
+  local t
+  for t in $INSTALLED_TAGS; do
+    [[ "$t" == "$EMBED_MODEL" || "${t%%:*}" == "$EMBED_MODEL" ]] && return 0
+  done
+  return 1
+}
+
 # Installed models the catalog has no row for (hf.co/... GGUF pulls, custom
 # builds) still deserve fit verdicts: append them, sized from what is actually
 # on disk — `ollama list` when a server answers, else the store's manifests.
@@ -1033,19 +1044,22 @@ if (( INTERACTIVE )); then
 
   # --- Apply: pull whatever is missing (needs network) ----------------------
   NEED_LLM=0; llm_installed "$CHOSEN_LLM" || NEED_LLM=1
+  NEED_EMBED=0; embed_installed || NEED_EMBED=1
   NEED_WHISPER=0
   [[ "$CHOSEN_STT_ENGINE" == "whisper_mlx" ]] && ! hf_model_installed "$CHOSEN_STT_HFDIR" && NEED_WHISPER=1
-  if (( NEED_LLM || NEED_WHISPER )); then
+  if (( NEED_LLM || NEED_EMBED || NEED_WHISPER )); then
     echo
     (( NEED_LLM ))     && echo "  missing: LLM ${CHOSEN_LLM}"
+    (( NEED_EMBED ))   && echo "  missing: embed model ${EMBED_MODEL} (RAG — ./locat.sh index-rag needs it)"
     (( NEED_WHISPER )) && echo "  missing: Whisper-MLX ${CHOSEN_STT_MODEL}"
     read -r -p "pull missing models now? (needs network) [y/N] " ans || ans=""
     if [[ "$ans" =~ ^[Yy] ]]; then
-      if (( NEED_LLM )); then
+      if (( NEED_LLM || NEED_EMBED )); then
         if ollama list >/dev/null 2>&1; then
-          if ! ollama pull "$CHOSEN_LLM"; then
-            warn "ollama pull failed — check the tag name and network"
-          fi
+          (( NEED_LLM ))   && ! ollama pull "$CHOSEN_LLM" \
+            && warn "ollama pull failed — check the tag name and network"
+          (( NEED_EMBED )) && ! ollama pull "$EMBED_MODEL" \
+            && warn "ollama pull ${EMBED_MODEL} failed — check the tag name and network"
         else
           warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOCAT_LLM_MODEL from .env on startup)"
         fi

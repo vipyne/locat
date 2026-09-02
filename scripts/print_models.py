@@ -220,14 +220,11 @@ def model_entries() -> list[dict]:
 def main() -> None:
     # --bare: just the aligned lines, no "models:" prefix or blank lines
     # (configure.sh prints its own section header above them).
-    # EMBED stays off the printed lines until configure.sh learns about it.
     bare = "--bare" in sys.argv[1:]
     lines = []
     for entry in model_entries():
-        if entry["role"] == "EMBED":
-            continue
-        lines.append(f"{entry['role']}  {entry['model']}")
-        lines.append(f"     {entry['path']}")
+        lines.append(f"{entry['role']:<7}{entry['model']}")
+        lines.append(f"       {entry['path']}")
     if bare:
         for line in lines:
             print(f"         {line}")
