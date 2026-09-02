@@ -103,7 +103,7 @@ uv sync --extra local-audio
 
 > [!NOTE]
 > `uv sync` uninstalls any extra you don't pass, so keep listing the ones you
-> want: `uv sync --extra local-audio --extra piper`. (`./doctor.sh -i` preserves
+> want: `uv sync --extra local-audio --extra piper`. (`./configure.sh -i` preserves
 > whatever is already installed.)
 
 Optionally copy the config template (everything is optional — the bot runs with an
@@ -177,7 +177,7 @@ MoQ browser bot — so you can skip the manual `run_ollama.sh` in step 2a. Pick 
 different transport with `-t`: `./start.sh -t webrtc` (browser, SmallWebRTC) or
 `./start.sh -t headphones` (local audio hardware) — see
 [echo cancellation](#how-do-you-solve-a-problem-like-echo-cancellation). Not sure
-what your machine can handle? `./doctor.sh` prints recommended STT/LLM/TTS cascades
+what your machine can handle? `./configure.sh` prints recommended STT/LLM/TTS cascades
 sized to your hardware (add `-v` for the full hardware profile and per-slot model
 catalogs ranked by fit, or `-i` to interactively pick a combo the script
 sanity-checks against your hardware).
@@ -307,7 +307,7 @@ changes the voice you hear.
 All three bots share one offline brain (the same STT → VAD → LLM → TTS pipeline);
 they differ only in the transport. The STT/LLM/TTS services themselves are built in
 `services.py`, dispatched on `LOCAT_STT_ENGINE` / `LOCAT_TTS_ENGINE` — so swapping engines (via
-`.env` or `./doctor.sh -i`) never touches a bot file you may have customized.
+`.env` or `./configure.sh -i`) never touches a bot file you may have customized.
 
 ```
 locat/
@@ -321,7 +321,7 @@ locat/
 │   └── financial_advisor.py  # the v1 system prompt
 │
 ├── start.sh                  # one command: bring up Ollama + run the bot (-t moq|webrtc|headphones)
-├── doctor.sh                 # what can this machine handle? (-v full report, -i model picker)
+├── configure.sh              # what can this machine handle? (-v full report, -i model picker)
 ├── stop.sh                   # stop the background Ollama server
 │
 ├── scripts/

@@ -8,7 +8,7 @@ shared with the browser bots; this module owns only what is transport-specific.
 Everything runs locally: LocalAudioTransport (mic + speakers), Silero VAD + Local
 Smart Turn v3 for turn-taking, and the STT/LLM/TTS engines built by services.py
 (defaults: Whisper-MLX, Ollama, Kokoro — swappable via LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE in
-.env or ./doctor.sh -i). No cloud services, no API keys.
+.env or ./configure.sh -i). No cloud services, no API keys.
 
 Importing this module has no side effects (no audio device access, no model loads) —
 all hardware/model construction happens inside the builder functions and `main()`.

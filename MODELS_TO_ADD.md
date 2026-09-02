@@ -25,7 +25,7 @@ Options, in rough order of preference:
    ships official support.
 2. **Via vr000m's TTS server** (below) — heavier, buys more engines.
 3. **Wait** for Pipecat to land #3487, then it's just another `services.py`
-   branch + doctor catalog rows.
+   branch + configure catalog rows.
 
 ## vr000m local STT/TTS WebSocket servers
 
@@ -50,7 +50,7 @@ Caveats found on review (2026-08):
 - Single-maintainer repos — API drift is on us to track.
 - Integration shape: `scripts/run_tts_server.sh` (+ start.sh management, like
   Ollama), vendored adapter, `TTS_ENGINE=local_server` branch in services.py,
-  doctor catalog rows + combo logic.
+  configure catalog rows + combo logic.
 
 Choose the servers over option 1 above if we also want Parakeet/Nemotron STT
 and warm-model restarts — one ported adapter per side buys all their backends.
@@ -71,9 +71,9 @@ integration (added 2026-08):
    actionable error if the dep is missing).
 2. `config.py` + `env.example`: engine value + model/voice var + defaults.
 3. `pyproject.toml`: optional extra if it needs a new package.
-4. `doctor.sh`: catalog rows/group (sizes, language notes, fit verdicts),
+4. `configure.sh`: catalog rows/group (sizes, language notes, fit verdicts),
    `-i` picker resolution, gated `uv sync --extra` install, combo math.
 5. `scripts/print_models.py`: engine-aware STT/TTS line.
 6. README: component table + config table + layout.
-7. Verify: construct the service via `uv run python -c`, doctor expect-tests,
+7. Verify: construct the service via `uv run python -c`, configure expect-tests,
    `./start.sh` smoke.

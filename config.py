@@ -88,11 +88,11 @@ os.environ.setdefault("LOCAT_KOKORO_MODEL_PATH", str(KOKORO_DIR / "kokoro-v1.0.o
 os.environ.setdefault("LOCAT_KOKORO_VOICES_PATH", str(KOKORO_DIR / "voices-v1.0.bin"))
 # Piper's voice download dir. Nothing external reads this — services.py passes
 # it to PiperTTSService(download_dir=...) — but it is kept in the environment so
-# doctor.sh (which cannot import this module) probes the same directory.
+# configure.sh (which cannot import this module) probes the same directory.
 os.environ.setdefault("LOCAT_PIPER_DOWNLOAD_DIR", str(MODELS_DIR / "piper"))
 # Ollama's store. Read by the `ollama` BINARY, not by any Python package: the bot
 # only talks to the server over HTTP. scripts/run_ollama.sh is what actually
-# exports it into `ollama serve`; setting it here keeps doctor.sh and
+# exports it into `ollama serve`; setting it here keeps configure.sh and
 # print_models.py reporting the same path the server uses.
 os.environ.setdefault("OLLAMA_MODELS", str(MODELS_DIR / "ollama"))
 
@@ -271,7 +271,7 @@ def ollama_models_dir() -> str:
     """Directory Ollama keeps the LLM in (OLLAMA_MODELS).
 
     Defaults to ``$LOCAT_MODEL_DIR/ollama``. Set by scripts/run_ollama.sh before
-    it starts the server; exposed here so doctor.sh and print_models.py can
+    it starts the server; exposed here so configure.sh and print_models.py can
     report the same path the server actually uses.
     """
     return _get("OLLAMA_MODELS", str(MODELS_DIR / "ollama"))

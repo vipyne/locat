@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# doctor.sh — report what this machine can handle for the offline voice bot.
+# configure.sh — report what this machine can handle for the offline voice bot.
 #
 # Runs on macOS (Apple Silicon or Intel) and Linux; on non-Apple-Silicon
 # machines the Apple-GPU STT (Whisper-MLX) is unavailable, so the CPU engines
@@ -16,10 +16,10 @@
 # engine support, and pulls missing models. Without -i it never writes.
 #
 # Usage:
-#   ./doctor.sh          # pass/fail + recommended cascades
-#   ./doctor.sh -v       # full capability matrix + STT/LLM/TTS catalogs
-#   ./doctor.sh -i       # interactively pick & approve an STT/LLM/TTS combo
-#   ./doctor.sh huggingface <url> [quant]
+#   ./configure.sh       # pass/fail + recommended cascades
+#   ./configure.sh -v    # full capability matrix + STT/LLM/TTS catalogs
+#   ./configure.sh -i    # interactively pick & approve an STT/LLM/TTS combo
+#   ./configure.sh huggingface <url> [quant]
 #                        # size-check a GGUF repo vs RAM, pull it via Ollama
 #
 set -euo pipefail
@@ -34,25 +34,25 @@ LOCAT_REPO_ROOT="$REPO"
 
 usage() {
   cat <<'EOF'
-doctor.sh — report what this machine can handle for the offline voice bot.
+configure.sh — report what this machine can handle for the offline voice bot.
 
 Usage:
-  ./doctor.sh              hardware check, STT/LLM/TTS cascades sized to this
+  ./configure.sh           hardware check, STT/LLM/TTS cascades sized to this
                            machine, and the currently configured models
-  ./doctor.sh huggingface <url|org/repo> [quant]
+  ./configure.sh huggingface <url|org/repo> [quant]
                            size-check a GGUF repo on Hugging Face against this
                            machine's memory, then pull it into the Ollama
                            store as hf.co/<org>/<repo>:<quant> (default quant
                            Q4_K_M); prints the LOCAT_LLM_MODEL line to use it
                            but never writes .env
-  ./doctor.sh -v           the above, plus a full hardware profile (CPU/GPU
+  ./configure.sh -v        the above, plus a full hardware profile (CPU/GPU
                            cores, est. memory bandwidth, disk) and per-slot
                            model catalogs with fit verdicts:
                              STT  Whisper-MLX, faster-whisper, Moonshine
                              LLM  curated Ollama catalog, ranked by memory
                                   footprint AND estimated speech latency
                              TTS  Kokoro, Piper
-  ./doctor.sh -i           interactively pick an STT/LLM/TTS combo, get it
+  ./configure.sh -i        interactively pick an STT/LLM/TTS combo, get it
                            approved against the hardware, then (each step
                            gated on your confirmation) write it to .env,
                            install missing engine support, and pull missing
@@ -66,8 +66,8 @@ Options:
   -h, --help               this help
 
 Environment:
-  LOCAT_DOCTOR_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
-                           doctor would say on a smaller machine)
+  LOCAT_CONFIGURE_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
+                           configure would say on a smaller machine)
   LOCAT_CATALOG_MAX_AGE_DAYS=<n>
                            refetch the ollama.com catalog when the cache is
                            older than <n> days (default 7; 0 never fetches)
@@ -77,7 +77,7 @@ Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
 Silicon; elsewhere the CPU engines (faster-whisper/Moonshine) are the
 defaults. On Windows, run under WSL.
 
-Without -i, doctor never writes config; the huggingface subcommand downloads
+Without -i, configure never writes config; the huggingface subcommand downloads
 into the Ollama model store but touches nothing else.
 EOF
 }
@@ -89,8 +89,8 @@ HF_CMD=0; HF_REPO=""; HF_QUANT="Q4_K_M"
 if [[ "${1:-}" == "huggingface" ]]; then
   HF_CMD=1
   HF_REPO="${2:-}"
-  [[ -n "$HF_REPO" ]] || { echo "doctor: huggingface needs a model URL or org/repo (try ./doctor.sh -h)" >&2; exit 1; }
-  [[ $# -le 3 ]] || { echo "doctor: too many arguments for huggingface (try ./doctor.sh -h)" >&2; exit 1; }
+  [[ -n "$HF_REPO" ]] || { echo "configure: huggingface needs a model URL or org/repo (try ./configure.sh -h)" >&2; exit 1; }
+  [[ $# -le 3 ]] || { echo "configure: too many arguments for huggingface (try ./configure.sh -h)" >&2; exit 1; }
   HF_QUANT="$(printf '%s' "${3:-Q4_K_M}" | tr '[:lower:]' '[:upper:]')"
   shift $#
 fi
@@ -101,7 +101,7 @@ while [[ $# -gt 0 ]]; do
     -a|--all)         SHOW_ALL=1 ;;
     -h|--help)        usage; exit 0 ;;
     "")               ;;
-    *) echo "doctor: unknown option '$1' (try ./doctor.sh -h)" >&2; exit 1 ;;
+    *) echo "configure: unknown option '$1' (try ./configure.sh -h)" >&2; exit 1 ;;
   esac
   shift
 done
@@ -226,14 +226,14 @@ llm_needs_gb() {
 # yet — under WSL this takes the Linux path.
 OS="$(uname -s)"; ARCH="$(uname -m)"
 MLX_OK=0
-# LOCAT_DOCTOR_PLATFORM overrides detection for previewing/testing another platform's
-# behavior, e.g.:  LOCAT_DOCTOR_PLATFORM=Darwin/x86_64 ./doctor.sh -v
-EFFECTIVE_PLATFORM="${LOCAT_DOCTOR_PLATFORM:-${OS}/${ARCH}}"
+# LOCAT_CONFIGURE_PLATFORM overrides detection for previewing/testing another platform's
+# behavior, e.g.:  LOCAT_CONFIGURE_PLATFORM=Darwin/x86_64 ./configure.sh -v
+EFFECTIVE_PLATFORM="${LOCAT_CONFIGURE_PLATFORM:-${OS}/${ARCH}}"
 case "$EFFECTIVE_PLATFORM" in
   Darwin/arm64) PLATFORM="Apple Silicon Mac"; MLX_OK=1 ;;
   Darwin/*)     PLATFORM="Intel Mac" ;;
   Linux/*)      PLATFORM="Linux ${EFFECTIVE_PLATFORM#*/}" ;;
-  *)            echo "doctor: unsupported platform ${EFFECTIVE_PLATFORM} (on Windows, run this under WSL)" >&2
+  *)            echo "configure: unsupported platform ${EFFECTIVE_PLATFORM} (on Windows, run this under WSL)" >&2
                 exit 1 ;;
 esac
 
@@ -255,9 +255,9 @@ else
   CPU_PERF=""; CPU_EFF=""
   OS_VER_LABEL="kernel"; OS_VER="$(uname -r)"
 fi
-# LOCAT_DOCTOR_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
-# e.g.:  LOCAT_DOCTOR_RAM_GB=8 ./doctor.sh -v
-RAM_GB="${LOCAT_DOCTOR_RAM_GB:-$DETECTED_RAM}"
+# LOCAT_CONFIGURE_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
+# e.g.:  LOCAT_CONFIGURE_RAM_GB=8 ./configure.sh -v
+RAM_GB="${LOCAT_CONFIGURE_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
 
 # =============================================================================
@@ -277,11 +277,11 @@ if (( HF_CMD )); then
   esac
   HF_REPO="${HF_REPO%/}"
   if [[ ! "$HF_REPO" =~ ^[^/]+/[^/]+$ ]]; then
-    echo "doctor: '$HF_REPO' doesn't look like a Hugging Face model URL or org/repo" >&2
+    echo "configure: '$HF_REPO' doesn't look like a Hugging Face model URL or org/repo" >&2
     exit 1
   fi
 
-  echo "doctor: huggingface ${HF_REPO} (quant ${HF_QUANT})"
+  echo "configure: huggingface ${HF_REPO} (quant ${HF_QUANT})"
   # The tree API lists every file with its size — enough to find the chosen
   # quant (summing split multi-part GGUFs) or report what the repo does have.
   PROBE_STATUS=0
@@ -330,11 +330,11 @@ PY
   warn "no fit check on arbitrary models — we don't know whether this will run well on this machine, or at all"
   if [[ -z "$MODEL_GB" ]]; then
     read -r -p "size unknown — download anyway? [y/N] " ans || ans=""
-    [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: nothing downloaded"; exit 1; }
+    [[ "$ans" =~ ^[Yy] ]] || { echo "configure: nothing downloaded"; exit 1; }
   elif (( MODEL_GB > RAM_GB )); then
     warn "model is LARGER than this machine's memory (~${MODEL_GB} GB vs ${RAM_GB} GB RAM)"
     read -r -p "download anyway? [y/N] " ans || ans=""
-    [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: nothing downloaded"; exit 1; }
+    [[ "$ans" =~ ^[Yy] ]] || { echo "configure: nothing downloaded"; exit 1; }
   fi
 
   if ! ollama list >/dev/null 2>&1; then
@@ -347,7 +347,7 @@ PY
     exit 1
   fi
   pass "pulled ${HF_TAG}"
-  echo "  to use it, set in .env (doctor won't write it for you):"
+  echo "  to use it, set in .env (configure won't write it for you):"
   echo "     LOCAT_LLM_MODEL=${HF_TAG}"
   exit 0
 fi
@@ -369,7 +369,7 @@ refresh_catalog() {
      && [[ -z "$(find "$CATALOG_CACHE" -mtime +$(( CATALOG_MAX_AGE - 1 )) 2>/dev/null)" ]]; then
     return 0
   fi
-  echo "doctor: refreshing LLM catalog from ollama.com (every ${CATALOG_MAX_AGE} days)…"
+  echo "configure: refreshing LLM catalog from ollama.com (every ${CATALOG_MAX_AGE} days)…"
   local tmp; tmp="$(mktemp)"
   if python3 "$REPO/scripts/fetch_catalog.py" >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
     mkdir -p "$(dirname "$CATALOG_CACHE")" && mv "$tmp" "$CATALOG_CACHE"
@@ -688,7 +688,7 @@ print_cascades() {
   compute_cascades
   (( ${#CAS_NAMES[@]} )) || return 0
   local i
-  echo "doctor: recommended cascades for this machine"
+  echo "configure: recommended cascades for this machine"
   for i in $(seq 0 $(( ${#CAS_NAMES[@]} - 1 ))); do
     echo "  ${CAS_NAMES[$i]}"
     echo "    STT $(cascade_stt_line "$i")"
@@ -697,7 +697,7 @@ print_cascades() {
       "$(kokoro_menu_num "$DEFAULT_VOICE")" "$DEFAULT_VOICE" "$(cascade_total_gb "$i")"
   done
   # No point advertising -i to someone already running it.
-  (( INTERACTIVE )) || echo "  (apply one with ./doctor.sh -i)"
+  (( INTERACTIVE )) || echo "  (apply one with ./configure.sh -i)"
 }
 
 print_slot_reccos() {  # $1 = stt|llm|tts — reprint one slot's recommendations above its -i menu
@@ -849,7 +849,7 @@ resolve_stt_pick() {
   local w=${#WHISPER_TABLE[@]} f=${#FASTER_WHISPER_TABLE[@]}
   if (( n <= w )); then
     if (( ! MLX_OK )); then
-      echo "doctor: Whisper-MLX needs an Apple Silicon Mac — pick a faster-whisper or Moonshine model" >&2
+      echo "configure: Whisper-MLX needs an Apple Silicon Mac — pick a faster-whisper or Moonshine model" >&2
       exit 1
     fi
     entry="${WHISPER_TABLE[$((n - 1))]}"
@@ -874,11 +874,11 @@ resolve_stt_pick() {
 # =============================================================================
 if (( INTERACTIVE )); then
   if [[ ! -t 0 ]]; then
-    echo "doctor: -i needs an interactive terminal (stdin is not a TTY)" >&2
+    echo "configure: -i needs an interactive terminal (stdin is not a TTY)" >&2
     exit 1
   fi
 
-  echo "doctor: interactive model picker"
+  echo "configure: interactive model picker"
   echo
   print_hardware_profile
   probe_engine_support
@@ -897,7 +897,7 @@ if (( INTERACTIVE )); then
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= STT_TOTAL )); then
     resolve_stt_pick "$ans"
   else
-    echo "doctor: '$ans' is not a valid choice" >&2; exit 1
+    echo "configure: '$ans' is not a valid choice" >&2; exit 1
   fi
   echo
 
@@ -937,7 +937,7 @@ if (( INTERACTIVE )); then
   echo
 
   # --- Combo verdict --------------------------------------------------------
-  echo "doctor: combo check — STT ${CHOSEN_STT_ENGINE}/${CHOSEN_STT_MODEL} + LLM ${CHOSEN_LLM} + TTS ${CHOSEN_TTS_ENGINE}/${CHOSEN_VOICE}"
+  echo "configure: combo check — STT ${CHOSEN_STT_ENGINE}/${CHOSEN_STT_MODEL} + LLM ${CHOSEN_LLM} + TTS ${CHOSEN_TTS_ENGINE}/${CHOSEN_VOICE}"
   TOK="$(est_tok_s "$(llm_active_gb "$CHOSEN_LLM")")"
   TOTAL=$(( LLM_GB + STT_GB + 1 ))   # +1 ≈ TTS (Kokoro 0.3 / Piper 0.1) rounded up
   SUGGEST="$(sorted_catalog_rows | awk -F'|' '$1==0{print $3; exit}')"
@@ -978,7 +978,7 @@ if (( INTERACTIVE )); then
   echo
   if (( ! APPROVED )); then
     read -r -p "combo was rejected — continue anyway? [y/N] " ans || ans=""
-    [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: no changes made"; exit 1; }
+    [[ "$ans" =~ ^[Yy] ]] || { echo "configure: no changes made"; exit 1; }
   fi
 
   # --- Apply: write .env (with backup), only the model/engine keys ----------
@@ -1072,14 +1072,14 @@ if (( INTERACTIVE )); then
     && echo "  note: Piper voice ${CHOSEN_VOICE} downloads on first use (needs network once)"
 
   echo
-  echo "doctor: ✅ combo ready — ./start.sh"
+  echo "configure: ✅ combo ready — ./start.sh"
   exit 0
 fi
 
 # =============================================================================
 # Default / verbose modes (read-only).
 # =============================================================================
-echo "doctor: hardware check"
+echo "configure: hardware check"
 if (( MLX_OK )); then
   pass "Apple Silicon Mac (${CHIP})"
   pass "${RAM_GB} GB unified memory"
@@ -1109,7 +1109,7 @@ echo
 print_cascades
 
 echo
-echo "doctor: current model configuration"
+echo "configure: current model configuration"
 # `uv run` implicitly syncs, so this is where a broken dependency tree first
 # surfaces. Show the real error instead of swallowing it — "run 'uv sync'" is
 # useless advice when uv sync is itself what's failing (e.g. a package with no
@@ -1127,7 +1127,7 @@ rm -f "$MODELS_ERR"
 if (( VERBOSE )); then
   probe_engine_support
   echo
-  echo "doctor: hardware profile"
+  echo "configure: hardware profile"
   print_hardware_profile
   if [[ -d "$LOCAT_MODEL_DIR" ]]; then
     echo "  models (LOCAT_MODEL_DIR=$LOCAT_MODEL_DIR):"
@@ -1145,13 +1145,13 @@ if (( VERBOSE )); then
   done
 
   echo
-  echo "doctor: model catalogs"
+  echo "configure: model catalogs"
   echo
   echo "~ LLM catalog ~"
   echo
   echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; --all for everything"))"
   print_catalog_table
-  echo "  (pick interactively with ./doctor.sh -i)"
+  echo "  (pick interactively with ./configure.sh -i)"
   echo
 
   echo

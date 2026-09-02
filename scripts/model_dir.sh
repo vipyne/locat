@@ -16,7 +16,7 @@
 #     └── ollama/        OLLAMA_MODELS      (the LLM)
 #
 # config.py resolves the same variable identically for the Python side; this
-# file exists because run_ollama.sh / doctor.sh need it too and cannot import
+# file exists because run_ollama.sh / configure.sh need it too and cannot import
 # config.py — they have to work before `uv sync` has built a venv. Keep the two
 # resolvers in step: relative paths resolve against the REPO ROOT (not the
 # caller's cwd, so it behaves the same however the script was invoked), and a
@@ -60,7 +60,7 @@ locat_resolve_model_dir() {  # $1 = repo root
   esac
 
   # Relative paths hang off the repo root, so `./models` means the same thing
-  # whether you ran ./doctor.sh from the repo or from three levels down.
+  # whether you ran ./configure.sh from the repo or from three levels down.
   case "$raw" in
     /*) ;;
     *) raw="$repo/$raw" ;;

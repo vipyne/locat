@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build doctor.sh's LLM catalog from ollama.com, emitting `tag|GB|note|activeGB` rows.
+"""Build configure.sh's LLM catalog from ollama.com, emitting `tag|GB|note|activeGB` rows.
 
-stdlib + system python3 only: doctor.sh calls this before any venv is guaranteed.
-Writes to stdout; doctor.sh caches the result and refreshes it weekly.
+stdlib + system python3 only: configure.sh calls this before any venv is guaranteed.
+Writes to stdout; configure.sh caches the result and refreshes it weekly.
 
     python3 scripts/fetch_catalog.py > cache
 """
@@ -20,14 +20,14 @@ from concurrent.futures import ThreadPoolExecutor
 
 LIBRARY = "https://ollama.com/library"
 REGISTRY = "https://registry.ollama.ai/v2/library"
-UA = {"User-Agent": "locat-doctor"}
+UA = {"User-Agent": "locat-configure"}
 MANIFEST = {**UA, "Accept": "application/vnd.docker.distribution.manifest.v2+json"}
 
 # Nothing above this can run on a consumer machine; skips ~25 pointless fetches.
 MAX_PARAMS_B = 150
 WORKERS = 16
 # Wall-clock budget. Past it we stop fetching and emit what we have rather than
-# letting doctor hang on a network that accepts connections but never answers.
+# letting configure hang on a network that accepts connections but never answers.
 DEADLINE_SECS = float(os.environ.get("LOCAT_CATALOG_DEADLINE", "45"))
 START = time.monotonic()
 
@@ -56,7 +56,7 @@ def parse_library(html):
         labels = set(re.findall(r"\b(tools|thinking|vision|embedding|cloud)\b", text))
         params = sorted(
             {float(n) for n, u in re.findall(r"\b(\d+(?:\.\d+)?)([bm])\b", text) if u == "b"},
-            reverse=True,   # largest first: doctor caps variants per family
+            reverse=True,   # largest first: configure caps variants per family
         )
         out.append((name, text, labels, params, pulls(text), age_days(text)))
     return out
@@ -130,7 +130,7 @@ def main():
     # Popularity alone buries anything new: pull counts are cumulative, so a
     # model released this month ranks below year-old ones no matter how good.
     # Interleaving the two orderings keeps the familiar names AND the new
-    # arrivals near the top, and doctor only ever shows a capped slice.
+    # arrivals near the top, and configure only ever shows a capped slice.
     by_pulls = sorted(entries, key=lambda e: -e[4])
     by_age = sorted(entries, key=lambda e: e[5])
     entries, seen = [], set()
@@ -142,7 +142,7 @@ def main():
 
     # Every model's tags page, not just ones whose blurb says "MoE" — several
     # (nemotron-3-nano) are MoE without saying so, and mislabelling one as dense
-    # makes doctor call the fastest models in the catalog too slow.
+    # makes configure call the fastest models in the catalog too slow.
     names = [e[0] for e in entries]
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         moe_map = dict(zip(names, ex.map(moe_active, names)))
@@ -163,7 +163,7 @@ def main():
         if active:
             active_gb = str(max(1, math.ceil(total_gb * active / params)))
             notes.append(f"MoE, {fmt_params(active)} active")
-        # doctor.sh excludes notes matching /thinking|reasoning/ from its
+        # configure.sh excludes notes matching /thinking|reasoning/ from its
         # recommended cascades; the label drives that automatically now.
         if "thinking" in labels_by_name.get(name, ()):
             notes.append("thinking")

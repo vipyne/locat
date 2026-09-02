@@ -15,7 +15,7 @@ dependencies = [
     "textual>=8.2.8",
 ]
 
-# Optional STT/TTS engines (see services.py; pick via ./doctor.sh -i):
+# Optional STT/TTS engines (see services.py; pick via ./configure.sh -i):
 #   uv sync --extra moonshine --extra piper
 # NOTE: piper-tts is GPL-3.0 — fine for running this repo, but relevant if you
 # distribute a closed-source app built on it.

@@ -1,7 +1,7 @@
 """services.py — engine-dispatching builders for the bot's STT / LLM / TTS.
 
 The three service builders live here, OUTSIDE the bot files, so that switching
-engines (via ``.env`` / ``./doctor.sh -i``) never touches ``bot.py`` /
+engines (via ``.env`` / ``./configure.sh -i``) never touches ``bot.py`` /
 ``bot_moq.py`` / ``bot_web.py`` — customize your pipeline freely in bot*.py.
 
 Each builder reads its engine choice from config (``LOCAT_STT_ENGINE`` /
@@ -30,7 +30,7 @@ def _engine_exit(engine: str, extra: str, exc: Exception) -> "None":
     sys.exit(
         f"\n✖ {engine} support is not installed ({exc})\n"
         f"  Install it:  uv sync --extra {extra}\n"
-        f"  (or pick a different engine with ./doctor.sh -i)\n"
+        f"  (or pick a different engine with ./configure.sh -i)\n"
     )
 
 
@@ -42,7 +42,7 @@ def build_stt():
         if not config.IS_APPLE_SILICON:
             sys.exit(
                 "\n✖ LOCAT_STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
-                "  Set LOCAT_STT_ENGINE=faster_whisper in .env (or run ./doctor.sh -i)\n"
+                "  Set LOCAT_STT_ENGINE=faster_whisper in .env (or run ./configure.sh -i)\n"
             )
         from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 
