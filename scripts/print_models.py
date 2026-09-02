@@ -126,14 +126,13 @@ def _ollama_manifest(store: Path, tag: str) -> Path | None:
     return None
 
 
-def _llm_file() -> Path | None:
-    """The LLM's weights blob — from the RUNNING server when there is one.
+def _ollama_file(tag: str) -> Path | None:
+    """An Ollama model's weights blob — from the RUNNING server when there is one.
 
     `ollama show` answers with the store the server actually uses, which may
     not be the configured OLLAMA_MODELS (e.g. a menu-bar Ollama.app serving
     from ~/.ollama). That live answer is the truth about where a pull lands.
     """
-    tag = config.llm_model()
     try:
         out = subprocess.run(
             ["ollama", "show", "--modelfile", tag],
@@ -199,18 +198,36 @@ def _tts_line() -> str:
     return f"unknown engine '{engine}'"
 
 
+def model_entries() -> list[dict]:
+    """Importable form of the model lines (bot_moq sends them as `locat-config`)."""
+    ollama = f"(Ollama @ {config.ollama_base_url()})"
+    return [
+        {"role": "STT", "model": _stt_line(), "path": _path_line(_stt_file())},
+        {
+            "role": "LLM",
+            "model": f"{config.llm_model()} {ollama}",
+            "path": _path_line(_ollama_file(config.llm_model())),
+        },
+        {"role": "TTS", "model": _tts_line(), "path": _path_line(_tts_file())},
+        {
+            "role": "EMBED",
+            "model": f"{config.embed_model()} {ollama}",
+            "path": _path_line(_ollama_file(config.embed_model())),
+        },
+    ]
+
+
 def main() -> None:
     # --bare: just the aligned lines, no "models:" prefix or blank lines
     # (configure.sh prints its own section header above them).
+    # EMBED stays off the printed lines until configure.sh learns about it.
     bare = "--bare" in sys.argv[1:]
-    lines = [
-        f"STT  {_stt_line()}",
-        f"     {_path_line(_stt_file())}",
-        f"LLM  {config.llm_model()} (Ollama @ {config.ollama_base_url()})",
-        f"     {_path_line(_llm_file())}",
-        f"TTS  {_tts_line()}",
-        f"     {_path_line(_tts_file())}",
-    ]
+    lines = []
+    for entry in model_entries():
+        if entry["role"] == "EMBED":
+            continue
+        lines.append(f"{entry['role']}  {entry['model']}")
+        lines.append(f"     {entry['path']}")
     if bare:
         for line in lines:
             print(f"         {line}")

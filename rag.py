@@ -268,24 +268,28 @@ def _cli_index() -> None:
     )
 
 
+def stats_summary(index_dir: Path, data_dir: str) -> str:
+    manifest_path = index_dir / "manifest.json"
+    if not manifest_path.is_file():
+        return "no index (run ./locat.sh index-rag)"
+    manifest = json.loads(manifest_path.read_text())
+    chunks = len((index_dir / "chunks.jsonl").read_text().splitlines())
+    return f"index: {chunks} chunks from {len(manifest.get('files', {}))} files ({data_dir})"
+
+
 def _cli_stats(bare: bool) -> None:
     import config
 
     index_dir = Path(config.rag_index_dir())
+    print(stats_summary(index_dir, config.rag_data_dir()))
     manifest_path = index_dir / "manifest.json"
-    if not manifest_path.is_file():
-        print("no index (run ./locat.sh index-rag)")
+    if bare or not manifest_path.is_file():
         return
     manifest = json.loads(manifest_path.read_text())
-    chunks = len((index_dir / "chunks.jsonl").read_text().splitlines())
-    files = manifest.get("files", {})
-    print(f"index: {chunks} chunks from {len(files)} files ({config.rag_data_dir()})")
-    if bare:
-        return
     print(f"index dir:   {index_dir}")
     print(f"embed model: {manifest.get('embed_model')}")
     print(f"chunking:    {manifest.get('chunk_tokens')} tokens, {manifest.get('overlap')} overlap")
-    for path in sorted(files):
+    for path in sorted(manifest.get("files", {})):
         print(f"  {path}")
 
 

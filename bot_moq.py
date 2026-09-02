@@ -17,6 +17,8 @@ the ONLY difference from bot_web.py is the transport (MOQParams) and MoQ's event
 # config FIRST — sets HF_HOME / Kokoro cache paths before any pipecat/HF import (see config.py).
 import config
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.frames.frames import TTSSpeakFrame
@@ -27,10 +29,23 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
 
+import rag
 from bot import _configure_logging, _preflight_llm, _preflight_rag
 from pipeline import build_pipeline
+from scripts.print_models import model_entries
 
 load_dotenv(override=True)
+
+CONFIG_MESSAGE_TYPE = "locat-config"
+
+
+def _locat_config_message() -> dict:
+    return {
+        "type": CONFIG_MESSAGE_TYPE,
+        "models": model_entries(),
+        "ollama_host": config.ollama_base_url(),
+        "rag": rag.stats_summary(Path(config.rag_index_dir()), config.rag_data_dir()),
+    }
 
 # MoQ transport with audio in/out. Serve mode (the bot is its own MoQ relay)
 transport_params = {
@@ -43,6 +58,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     """
     built = build_pipeline(transport)
     worker = PipelineWorker(built.pipeline, params=PipelineParams())
+
+    @worker.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        logger.info("RTVI client ready — sending locat-config")
+        await rtvi.send_server_message(_locat_config_message())
 
     # NOTE: MoQ's handlers differ from SmallWebRTC's — they receive only the transport
     # (no client argument).

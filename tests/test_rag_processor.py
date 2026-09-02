@@ -1,12 +1,14 @@
 import asyncio
+import json
 from pathlib import Path
 
 from pipecat.frames.frames import LLMContextFrame, TextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 from pipecat.tests.utils import run_test
 
 from rag import FakeEmbedder, index
-from rag_processor import EXCERPTS_HEADER, RAGProcessor
+from rag_processor import EXCERPTS_HEADER, RAG_MESSAGE_TYPE, RAGProcessor
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -23,14 +25,18 @@ def build_index(tmp_path: Path) -> Path:
     return index_dir
 
 
-def send_context(processor: RAGProcessor, context: LLMContext) -> None:
-    asyncio.run(
+def send_context(
+    processor: RAGProcessor, context: LLMContext, expect_rag_message: bool = True
+) -> list:
+    expected = [LLMContextFrame, RTVIServerMessageFrame] if expect_rag_message else [LLMContextFrame]
+    down, _ = asyncio.run(
         run_test(
             processor,
             frames_to_send=[LLMContextFrame(context=context)],
-            expected_down_frames=[LLMContextFrame],
+            expected_down_frames=expected,
         )
     )
+    return down
 
 
 def excerpts_messages(context: LLMContext) -> list[dict]:
@@ -76,7 +82,7 @@ def test_excerpts_message_stays_singular_across_turns(tmp_path):
 def test_passthrough_when_no_index(tmp_path):
     processor = RAGProcessor(tmp_path / "missing", FakeEmbedder(), top_k=4)
     context = LLMContext(messages=[{"role": "user", "content": "anything at all"}])
-    send_context(processor, context)
+    send_context(processor, context, expect_rag_message=False)
 
     assert excerpts_messages(context) == []
     assert context.messages == [{"role": "user", "content": "anything at all"}]
@@ -85,9 +91,26 @@ def test_passthrough_when_no_index(tmp_path):
 def test_context_without_user_message_untouched(tmp_path):
     processor = RAGProcessor(build_index(tmp_path), FakeEmbedder(), top_k=2)
     context = LLMContext(messages=[{"role": "system", "content": "sys only"}])
-    send_context(processor, context)
+    send_context(processor, context, expect_rag_message=False)
 
     assert context.messages == [{"role": "system", "content": "sys only"}]
+
+
+def test_retrieval_emits_locat_rag_server_message(tmp_path):
+    processor = RAGProcessor(build_index(tmp_path), FakeEmbedder(), top_k=2)
+    context = LLMContext(messages=[{"role": "user", "content": NOTE_TXT_CHUNK}])
+    down = send_context(processor, context)
+
+    message = next(f for f in down if isinstance(f, RTVIServerMessageFrame)).data
+    json.dumps(message)
+    assert message["type"] == RAG_MESSAGE_TYPE
+    assert message["query"] == NOTE_TXT_CHUNK
+    assert len(message["chunks"]) == 2
+    top = message["chunks"][0]
+    assert top["source_path"] == str((FIXTURES / "note.txt").resolve())
+    assert "quokka" in top["text"]
+    assert isinstance(top["score"], float)
+    assert top["page"] is None
 
 
 def test_other_frames_pass_through(tmp_path):
