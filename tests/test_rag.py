@@ -5,7 +5,7 @@ import httpx
 import numpy as np
 import pytest
 
-from rag import FakeEmbedder, OllamaEmbedder, chunk_text, extract, index, retrieve
+from rag import FakeEmbedder, OllamaEmbedder, chunk_text, extract, has_index, index, retrieve
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -200,3 +200,10 @@ def test_reindex_overwrites_and_invalidates_cache(tmp_path):
     chunks = retrieve("A wombat digs a burrow.", 4, index_dir, embedder)
     assert len(chunks) == 1
     assert "wombat" in chunks[0].text
+
+
+def test_has_index_flips_after_indexing(tmp_path):
+    index_dir = tmp_path / "rag-index"
+    assert not has_index(index_dir)
+    index(FIXTURES, index_dir, FakeEmbedder())
+    assert has_index(index_dir)

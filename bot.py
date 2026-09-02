@@ -19,6 +19,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 # Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
@@ -35,6 +36,8 @@ from pipecat.workers.runner import WorkerRunner
 
 if TYPE_CHECKING:  # import for typing only — see build_transport() for why
     from pipecat.transports.local.audio import LocalAudioTransport
+
+import rag
 
 # Pipeline assembly (VAD/STT/LLM/TTS/context) lives in pipeline.py, shared by all bots.
 from pipeline import build_pipeline
@@ -129,6 +132,15 @@ def _preflight_llm(model: str, base_url: str) -> None:
     logger.info(f"LLM preflight OK: '{model}' available at {base_url}")
 
 
+def _preflight_rag() -> None:
+    """When a RAG index exists the pipeline will embed every user turn, so the
+    embed model must be pulled — check it upfront like the LLM. No index → RAG
+    is off → nothing to check.
+    """
+    if rag.has_index(Path(config.rag_index_dir())):
+        rag.preflight_embed_model(config.embed_model(), config.ollama_api_url())
+
+
 async def main() -> None:
     """`uv run bot.py` entry point. It loads `.env` (config only — no
         secrets), assembles the pipeline, and hands the worker to a `WorkerRunner`,
@@ -140,6 +152,7 @@ async def main() -> None:
     # Fail fast (with guidance) if the local LLM server/model isn't ready, rather
     # than silently producing no spoken reply when the first turn hits the LLM.
     _preflight_llm(config.llm_model(), config.ollama_base_url())
+    _preflight_rag()
 
     transport = build_transport()
     built = build_pipeline(transport)

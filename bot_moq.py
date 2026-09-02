@@ -27,7 +27,7 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
 
-from bot import _configure_logging, _preflight_llm
+from bot import _configure_logging, _preflight_llm, _preflight_rag
 from pipeline import build_pipeline
 
 load_dotenv(override=True)
@@ -87,6 +87,7 @@ async def bot(runner_args: RunnerArguments) -> None:
 if __name__ == "__main__":
     _configure_logging()
     _preflight_llm(config.llm_model(), config.ollama_base_url())
+    _preflight_rag()
 
     from pipecat.runner.run import main
 

@@ -176,6 +176,10 @@ def index(
     return IndexStats(files=len(file_hashes), chunks=len(records), embed_model=embedder.model)
 
 
+def has_index(index_dir: Path) -> bool:
+    return (index_dir / "embeddings.npy").is_file() and (index_dir / "chunks.jsonl").is_file()
+
+
 _index_cache: dict[str, tuple[tuple[int, int], list[dict], np.ndarray]] = {}
 
 
@@ -218,7 +222,7 @@ def retrieve(query: str, k: int, index_dir: Path, embedder: Embedder) -> list[Ch
     ]
 
 
-def _preflight_embed_model(model: str, api_url: str) -> None:
+def preflight_embed_model(model: str, api_url: str) -> None:
     """Fail fast with the exact remedy if Ollama is down or the embed model
     isn't pulled — mirrors bot._preflight_llm."""
     try:
@@ -250,7 +254,7 @@ def _cli_index() -> None:
             "and rerun ./locat.sh index-rag"
         )
         return
-    _preflight_embed_model(config.embed_model(), config.ollama_api_url())
+    preflight_embed_model(config.embed_model(), config.ollama_api_url())
     stats = index(
         data_dir,
         index_dir,
