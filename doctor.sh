@@ -488,6 +488,53 @@ llm_installed() {
   return 1
 }
 
+# Installed models the catalog has no row for (hf.co/... GGUF pulls, custom
+# builds) still deserve fit verdicts: append them, sized from what is actually
+# on disk — `ollama list` when a server answers, else the store's manifests.
+append_installed_rows() {
+  local pairs="" tag gb entry dup
+  if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then
+    pairs="$(ollama list 2>/dev/null | awk 'NR>1 && NF>=4 {
+      n=$3; gb=($4=="GB") ? int(n)+(n>int(n)) : 1; print $1"|"gb }')"
+  elif [[ -d "$OLLAMA_MODELS/manifests" ]] && command -v python3 >/dev/null 2>&1; then
+    pairs="$(python3 - "$OLLAMA_MODELS/manifests" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+for dirpath, _, files in os.walk(root):
+    for f in files:
+        path = os.path.join(dirpath, f)
+        rel = os.path.relpath(path, root).split(os.sep)
+        if len(rel) < 3:
+            continue
+        host, mid, tagname = rel[0], rel[1:-1], rel[-1]
+        if host == "registry.ollama.ai":
+            if mid and mid[0] == "library":
+                mid = mid[1:]
+            tag = "/".join(mid) + ":" + tagname
+        else:
+            tag = host + "/" + "/".join(mid) + ":" + tagname
+        try:
+            with open(path) as fh:
+                total = sum(l.get("size", 0) for l in json.load(fh).get("layers", []))
+        except (OSError, ValueError):
+            continue
+        print(f"{tag}|{-(-total // 2**30)}")
+PY
+)"
+  fi
+  [[ -z "$pairs" ]] && return 0
+  while IFS='|' read -r tag gb; do
+    [[ -z "$tag" || -z "$gb" ]] && continue
+    dup=0
+    for entry in "${LLM_CATALOG[@]}"; do
+      [[ "${entry%%|*}" == "$tag" ]] && { dup=1; break; }
+    done
+    (( dup )) && continue
+    LLM_CATALOG+=("${tag}|${gb}")
+  done <<<"$pairs"
+}
+append_installed_rows
+
 hf_model_installed() {  # $1 = HF cache dir suffix, e.g. mlx-community--whisper-tiny
   [[ -d "${HF_HOME}/hub/models--$1" ]]
 }
