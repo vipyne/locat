@@ -1,0 +1,2 @@
+This plain-text fixture mentions a quokka. The quokka lives entirely offline on this
+machine. Nothing in these notes ever leaves the laptop.

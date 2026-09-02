@@ -1,6 +1,32 @@
 """Offline RAG over the user's documents. Bot code only calls index() / retrieve()."""
 
 import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from loguru import logger
+from pypdf import PdfReader
+
+
+@dataclass
+class PageText:
+    text: str
+    source_path: str
+    page: int | None
+
+
+def extract(path: Path) -> list[PageText]:
+    source_path = str(path.resolve())
+    suffix = path.suffix.lower()
+    if suffix in (".txt", ".md"):
+        return [PageText(text=path.read_text(), source_path=source_path, page=None)]
+    if suffix == ".pdf":
+        return [
+            PageText(text=page.extract_text(), source_path=source_path, page=number)
+            for number, page in enumerate(PdfReader(path).pages, start=1)
+        ]
+    logger.info(f"skipping {source_path}: unsupported extension")
+    return []
 
 
 def chunk_text(text: str, chunk_tokens: int = 500, overlap: int = 50) -> list[str]:

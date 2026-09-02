@@ -11,6 +11,7 @@ dependencies = [
     # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
     # platforms default to faster-whisper (CPU) instead (see services.py).
     "pipecat-ai[mlx-whisper]>=1.7.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "pypdf>=6.16.2",
     "python-dotenv>=1.2.2",
     "textual>=8.2.8",
 ]
