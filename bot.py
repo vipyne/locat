@@ -68,7 +68,7 @@ def build_transport() -> "LocalAudioTransport":
             "  then:   uv sync --extra local-audio\n"
             "\n"
             "Or skip it and use a browser front-end, which needs no PortAudio and\n"
-            "gives you echo cancellation for free:  ./start.sh  (or: ./start.sh -t moq)"
+            "gives you echo cancellation for free:  ./locat.sh start"
         )
 
     params = LocalAudioTransportParams(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the exact STT/LLM/TTS engines + models the bot will load.
 
-Shared by start.sh and configure.sh so the printed values can never drift from
+Shared by locat.sh and configure.sh so the printed values can never drift from
 what the bot actually loads: everything resolves through config.py (which
 loads ./.env), including the engine choice (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE) that
 services.py dispatches on.

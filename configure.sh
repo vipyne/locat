@@ -1072,7 +1072,7 @@ if (( INTERACTIVE )); then
     && echo "  note: Piper voice ${CHOSEN_VOICE} downloads on first use (needs network once)"
 
   echo
-  echo "configure: ✅ combo ready — ./start.sh"
+  echo "configure: ✅ combo ready — ./locat.sh start"
   exit 0
 fi
 

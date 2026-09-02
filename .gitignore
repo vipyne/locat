@@ -4,6 +4,12 @@ models/
 # Python virtual environment
 .venv/
 
+# locat.sh runtime state (pidfiles for the processes locat started)
+.locat/
+
+# User documents indexed by RAG
+data/
+
 # Local config (copied from env.example; config only, never secrets)
 .env
 

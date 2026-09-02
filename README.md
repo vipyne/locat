@@ -283,7 +283,8 @@ not something ollama reads.
 | `LOCAT_GREETING` | *"Hi. I'm your private, offline financial thinking partner…"* | Opening line spoken on startup. |
 | `LOCAT_GREETING_DELAY_SECS` | `1.0` | Delay before the greeting (lets the audio-out stream spin up). |
 | `LOCAT_LOG_LEVEL` | `DEBUG` | Loguru level for stderr. `DEBUG` surfaces each service's activity — handy for the offline check. |
-| `LOCAT_WEB_PORT` | `7860` | Port `bot_web.py` / `bot_moq.py` serve on (used by `./start.sh`). |
+| `LOCAT_WEB_PORT` | `7860` | Port `bot_moq.py` serves on (used by `./locat.sh start`). |
+| `LOCAT_STATE_DIR` | `.locat` | Where `./locat.sh` records the PIDs of the processes it started — the only PIDs `./locat.sh stop` will ever touch. Relative paths resolve against the repo root. |
 | `LOCAT_VAD_CONFIDENCE` | `0.7` | Silero speech-probability threshold (0–1) before audio counts as speech. |
 | `LOCAT_VAD_MIN_VOLUME` | `0.0` | Absolute-loudness gate. `0.0` disables it, which keeps turn detection level-independent across mics — raise toward `0.3`–`0.6` only if a noisy room false-triggers. |
 | `LOCAT_VAD_START_SECS` | `0.2` | Sustained speech before "user started speaking". |
