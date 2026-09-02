@@ -19,6 +19,8 @@
 #   ./doctor.sh          # pass/fail + recommended cascades
 #   ./doctor.sh -v       # full capability matrix + STT/LLM/TTS catalogs
 #   ./doctor.sh -i       # interactively pick & approve an STT/LLM/TTS combo
+#   ./doctor.sh huggingface <url> [quant]
+#                        # size-check a GGUF repo vs RAM, pull it via Ollama
 #
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +39,12 @@ doctor.sh — report what this machine can handle for the offline voice bot.
 Usage:
   ./doctor.sh              hardware check, STT/LLM/TTS cascades sized to this
                            machine, and the currently configured models
+  ./doctor.sh huggingface <url|org/repo> [quant]
+                           size-check a GGUF repo on Hugging Face against this
+                           machine's memory, then pull it into the Ollama
+                           store as hf.co/<org>/<repo>:<quant> (default quant
+                           Q4_K_M); prints the LOCAT_LLM_MODEL line to use it
+                           but never writes .env
   ./doctor.sh -v           the above, plus a full hardware profile (CPU/GPU
                            cores, est. memory bandwidth, disk) and per-slot
                            model catalogs with fit verdicts:
@@ -69,13 +77,23 @@ Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
 Silicon; elsewhere the CPU engines (faster-whisper/Moonshine) are the
 defaults. On Windows, run under WSL.
 
-Without -i, doctor never writes anything.
+Without -i, doctor never writes config; the huggingface subcommand downloads
+into the Ollama model store but touches nothing else.
 EOF
 }
 
 VERBOSE=0
 INTERACTIVE=0
 SHOW_ALL=0
+HF_CMD=0; HF_REPO=""; HF_QUANT="Q4_K_M"
+if [[ "${1:-}" == "huggingface" ]]; then
+  HF_CMD=1
+  HF_REPO="${2:-}"
+  [[ -n "$HF_REPO" ]] || { echo "doctor: huggingface needs a model URL or org/repo (try ./doctor.sh -h)" >&2; exit 1; }
+  [[ $# -le 3 ]] || { echo "doctor: too many arguments for huggingface (try ./doctor.sh -h)" >&2; exit 1; }
+  HF_QUANT="$(printf '%s' "${3:-Q4_K_M}" | tr '[:lower:]' '[:upper:]')"
+  shift $#
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -v|--verbose)     VERBOSE=1 ;;
@@ -241,6 +259,98 @@ fi
 # e.g.:  LOCAT_DOCTOR_RAM_GB=8 ./doctor.sh -v
 RAM_GB="${LOCAT_DOCTOR_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
+
+# =============================================================================
+# huggingface subcommand: size-check a GGUF repo against this machine's RAM,
+# then pull it through Ollama (hf.co/<org>/<repo>:<quant>). Ollama only runs
+# GGUF, so source-weight repos are rejected with a pointer to community
+# conversions instead of downloading something nothing here can serve.
+# =============================================================================
+if (( HF_CMD )); then
+  HF_REPO="${HF_REPO#http://}"; HF_REPO="${HF_REPO#https://}"
+  HF_REPO="${HF_REPO#huggingface.co/}"; HF_REPO="${HF_REPO#hf.co/}"
+  HF_REPO="${HF_REPO%%\?*}"
+  case "$HF_REPO" in
+    */tree/*)    HF_REPO="${HF_REPO%%/tree/*}" ;;
+    */blob/*)    HF_REPO="${HF_REPO%%/blob/*}" ;;
+    */resolve/*) HF_REPO="${HF_REPO%%/resolve/*}" ;;
+  esac
+  HF_REPO="${HF_REPO%/}"
+  if [[ ! "$HF_REPO" =~ ^[^/]+/[^/]+$ ]]; then
+    echo "doctor: '$HF_REPO' doesn't look like a Hugging Face model URL or org/repo" >&2
+    exit 1
+  fi
+
+  echo "doctor: huggingface ${HF_REPO} (quant ${HF_QUANT})"
+  # The tree API lists every file with its size — enough to find the chosen
+  # quant (summing split multi-part GGUFs) or report what the repo does have.
+  PROBE_STATUS=0
+  PROBE="$(python3 - "$HF_REPO" "$HF_QUANT" <<'PY'
+import json, re, sys, urllib.request
+repo, quant = sys.argv[1], sys.argv[2]
+url = f"https://huggingface.co/api/models/{repo}/tree/main"
+try:
+    with urllib.request.urlopen(url, timeout=15) as r:
+        files = json.load(r)
+except Exception:
+    sys.exit(3)
+ggufs = [f for f in files if f.get("path", "").lower().endswith(".gguf")]
+if not ggufs:
+    print("NOGGUF")
+    sys.exit(0)
+def quant_of(path):
+    name = path.rsplit("/", 1)[-1]
+    m = re.search(r"(?i)(?:^|[^a-z0-9])(i?q\d[a-z0-9_]*)", name)
+    return m.group(1).upper() if m else ""
+total = sum(f.get("size", 0) for f in ggufs if quant_of(f["path"]) == quant)
+if total == 0:
+    avail = sorted({q for q in (quant_of(f["path"]) for f in ggufs) if q})
+    print("NOQUANT " + ",".join(avail))
+    sys.exit(0)
+print(f"SIZE {-(-total // 2**30)}")
+PY
+)" || PROBE_STATUS=$?
+
+  MODEL_GB=""
+  if (( PROBE_STATUS != 0 )); then
+    warn "couldn't reach huggingface.co to size the model — offline?"
+  elif [[ "$PROBE" == "NOGGUF" ]]; then
+    echo "  ❌ ${HF_REPO} has no GGUF files — locat serves LLMs through Ollama, which"
+    echo "     only runs GGUF. Source-weight repos usually have community conversions:"
+    echo "       https://huggingface.co/models?search=${HF_REPO#*/}+gguf"
+    exit 1
+  elif [[ "$PROBE" == NOQUANT* ]]; then
+    echo "  ❌ no ${HF_QUANT} file in ${HF_REPO}; available: ${PROBE#NOQUANT }" >&2
+    exit 1
+  else
+    MODEL_GB="${PROBE#SIZE }"
+    echo "  ${HF_QUANT} is ~${MODEL_GB} GB on disk; this machine has ${RAM_GB} GB RAM"
+  fi
+
+  warn "no fit check on arbitrary models — we don't know whether this will run well on this machine, or at all"
+  if [[ -z "$MODEL_GB" ]]; then
+    read -r -p "size unknown — download anyway? [y/N] " ans || ans=""
+    [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: nothing downloaded"; exit 1; }
+  elif (( MODEL_GB > RAM_GB )); then
+    warn "model is LARGER than this machine's memory (~${MODEL_GB} GB vs ${RAM_GB} GB RAM)"
+    read -r -p "download anyway? [y/N] " ans || ans=""
+    [[ "$ans" =~ ^[Yy] ]] || { echo "doctor: nothing downloaded"; exit 1; }
+  fi
+
+  if ! ollama list >/dev/null 2>&1; then
+    warn "no Ollama server running — start ./scripts/run_ollama.sh, then rerun this"
+    exit 1
+  fi
+  HF_TAG="hf.co/${HF_REPO}:${HF_QUANT}"
+  if ! ollama pull "$HF_TAG"; then
+    warn "ollama pull failed — check the repo name, quant, and network"
+    exit 1
+  fi
+  pass "pulled ${HF_TAG}"
+  echo "  to use it, set in .env (doctor won't write it for you):"
+  echo "     LOCAT_LLM_MODEL=${HF_TAG}"
+  exit 0
+fi
 
 # --- Live LLM catalog --------------------------------------------------------
 # ollama's library changes constantly, so the catalog is fetched and cached

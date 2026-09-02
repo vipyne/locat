@@ -5,8 +5,16 @@ Shared by start.sh and doctor.sh so the printed values can never drift from
 what the bot actually loads: everything resolves through config.py (which
 loads ./.env), including the engine choice (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE) that
 services.py dispatches on.
+
+Each model line is followed by the full path of its weights on disk, found by
+looking where the engine would actually load from — the configured stores AND
+the tools' default caches — so the path shows where a model really is, not
+where the config wishes it were. Files outside LOCAT_MODEL_DIR are flagged.
 """
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +23,152 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+
+OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
+NOT_DOWNLOADED = "(not downloaded yet)"
+
+
+def _hf_caches() -> list[Path]:
+    caches = [Path(os.environ["HF_HOME"]), Path.home() / ".cache" / "huggingface"]
+    seen: list[Path] = []
+    for c in caches:
+        if c not in seen:
+            seen.append(c)
+    return seen
+
+
+def _newest_weights_file(snapshots: Path) -> Path | None:
+    ref = snapshots.parent / "refs" / "main"
+    candidates = []
+    if ref.is_file() and (snapshots / ref.read_text().strip()).is_dir():
+        candidates = [snapshots / ref.read_text().strip()]
+    else:
+        candidates = sorted(
+            (d for d in snapshots.iterdir() if d.is_dir()),
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+    for snap in candidates:
+        files = [p for p in snap.rglob("*") if p.is_file()]
+        if files:
+            return max(files, key=lambda p: p.stat().st_size)
+    return None
+
+
+def _hf_repo_file(repo_id: str) -> Path | None:
+    """The largest file in the repo's latest local snapshot, in any HF cache."""
+    dirname = "models--" + repo_id.replace("/", "--")
+    for cache in _hf_caches():
+        snapshots = cache / "hub" / dirname / "snapshots"
+        if snapshots.is_dir():
+            found = _newest_weights_file(snapshots)
+            if found:
+                return found
+    return None
+
+
+def _hf_glob_file(dir_prefix: str) -> Path | None:
+    for cache in _hf_caches():
+        hub = cache / "hub"
+        if not hub.is_dir():
+            continue
+        for d in sorted(hub.glob(f"{dir_prefix}*")):
+            found = _newest_weights_file(d / "snapshots")
+            if found:
+                return found
+    return None
+
+
+def _faster_whisper_repo(value: str) -> str:
+    if "/" in value:
+        return value
+    try:
+        from faster_whisper.utils import _MODELS
+
+        return _MODELS.get(value, f"Systran/faster-whisper-{value}")
+    except ImportError:
+        return f"Systran/faster-whisper-{value}"
+
+
+def _stt_file() -> Path | None:
+    engine = config.stt_engine()
+    try:
+        if engine == "whisper_mlx":
+            from pipecat.services.whisper.stt import MLXModel
+
+            return _hf_repo_file(MLXModel[config.whisper_model()].value)
+        if engine == "faster_whisper":
+            from pipecat.services.whisper.stt import Model
+
+            repo = _faster_whisper_repo(Model[config.faster_whisper_model()].value)
+            return _hf_repo_file(repo)
+        if engine == "moonshine":
+            return _hf_glob_file("models--UsefulSensors--moonshine")
+    except (ImportError, KeyError):
+        return None
+    return None
+
+
+def _ollama_manifest(store: Path, tag: str) -> Path | None:
+    name, _, variant = tag.partition(":")
+    variant = variant or "latest"
+    if name.startswith("hf.co/"):
+        manifest = store / "manifests" / "hf.co" / name[len("hf.co/") :] / variant
+    else:
+        if "/" not in name:
+            name = f"library/{name}"
+        manifest = store / "manifests" / "registry.ollama.ai" / name / variant
+    if not manifest.is_file():
+        return None
+    for layer in json.loads(manifest.read_text()).get("layers", []):
+        if layer.get("mediaType", "").endswith("model"):
+            return store / "blobs" / layer["digest"].replace(":", "-")
+    return None
+
+
+def _llm_file() -> Path | None:
+    """The LLM's weights blob — from the RUNNING server when there is one.
+
+    `ollama show` answers with the store the server actually uses, which may
+    not be the configured OLLAMA_MODELS (e.g. a menu-bar Ollama.app serving
+    from ~/.ollama). That live answer is the truth about where a pull lands.
+    """
+    tag = config.llm_model()
+    try:
+        out = subprocess.run(
+            ["ollama", "show", "--modelfile", tag],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0:
+            for line in out.stdout.splitlines():
+                blob = line.removeprefix("FROM ").strip()
+                if line.startswith("FROM ") and blob.startswith("/"):
+                    return Path(blob)
+    except Exception:
+        pass
+    return _ollama_manifest(Path(config.ollama_models_dir()), tag)
+
+
+def _tts_file() -> Path | None:
+    if config.tts_engine() == "kokoro":
+        return Path(config.kokoro_model_path())
+    if config.tts_engine() == "piper":
+        return Path(config.piper_download_dir()) / f"{config.piper_voice()}.onnx"
+    return None
+
+
+def _path_line(found: Path | None) -> str:
+    if found is None:
+        return f"→ {NOT_DOWNLOADED}"
+    if not found.exists():
+        return f"→ {found}   {NOT_DOWNLOADED}"
+    try:
+        found.resolve().relative_to(Path(config.model_dir()).resolve())
+        return f"→ {found}"
+    except ValueError:
+        return f"→ {found}   {OUTSIDE_FLAG}"
 
 
 def _stt_line() -> str:
@@ -46,13 +200,16 @@ def _tts_line() -> str:
 
 
 def main() -> None:
-    # --bare: just the three aligned lines, no "models:" prefix or blank lines
+    # --bare: just the aligned lines, no "models:" prefix or blank lines
     # (doctor.sh prints its own section header above them).
     bare = "--bare" in sys.argv[1:]
     lines = [
         f"STT  {_stt_line()}",
+        f"     {_path_line(_stt_file())}",
         f"LLM  {config.llm_model()} (Ollama @ {config.ollama_base_url()})",
+        f"     {_path_line(_llm_file())}",
         f"TTS  {_tts_line()}",
+        f"     {_path_line(_tts_file())}",
     ]
     if bare:
         for line in lines:
