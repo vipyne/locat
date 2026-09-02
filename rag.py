@@ -1,6 +1,7 @@
 """Offline RAG over the user's documents. Bot code only calls index() / retrieve()."""
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,8 @@ def extract(path: Path) -> list[PageText]:
 
 
 class Embedder(Protocol):
+    model: str
+
     def embed(self, texts: list[str]) -> np.ndarray: ...
 
 
@@ -42,12 +45,12 @@ class OllamaEmbedder:
 
     def __init__(self, base_url: str, model: str, client: httpx.Client | None = None):
         self._url = f"{base_url.rstrip('/')}/api/embed"
-        self._model = model
+        self.model = model
         self._client = client or httpx.Client(timeout=120.0)
 
     def embed(self, texts: list[str]) -> np.ndarray:
         response = self._client.post(
-            self._url, json={"model": self._model, "input": texts}
+            self._url, json={"model": self.model, "input": texts}
         )
         response.raise_for_status()
         return np.asarray(response.json()["embeddings"], dtype=np.float32)
@@ -57,6 +60,7 @@ class FakeEmbedder:
     """Deterministic offline stand-in for tests: vector seeded from sha256(text)."""
 
     dim = 32
+    model = "fake"
 
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:
@@ -105,3 +109,109 @@ def chunk_text(text: str, chunk_tokens: int = 500, overlap: int = 50) -> list[st
     if current:
         chunks.append(current)
     return [" ".join(c) for c in chunks]
+
+
+EMBED_BATCH = 64
+
+
+@dataclass
+class IndexStats:
+    files: int
+    chunks: int
+    embed_model: str
+
+
+@dataclass
+class Chunk:
+    text: str
+    source_path: str
+    page: int | None
+    score: float
+
+
+def index(
+    data_dir: Path,
+    index_dir: Path,
+    embedder: Embedder,
+    chunk_tokens: int = 500,
+    overlap: int = 50,
+) -> IndexStats:
+    """Full rebuild: data_dir → chunks.jsonl + embeddings.npy + manifest.json."""
+    records: list[dict] = []
+    file_hashes: dict[str, str] = {}
+    for path in sorted(p for p in data_dir.rglob("*") if p.is_file()):
+        pages = extract(path)
+        if not pages:
+            continue
+        file_hashes[pages[0].source_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for page in pages:
+            for text in chunk_text(page.text, chunk_tokens, overlap):
+                records.append(
+                    {"text": text, "source_path": page.source_path, "page": page.page}
+                )
+
+    batches = [
+        embedder.embed([r["text"] for r in records[i : i + EMBED_BATCH]])
+        for i in range(0, len(records), EMBED_BATCH)
+    ]
+    embeddings = np.vstack(batches) if batches else np.zeros((0, 0), dtype=np.float32)
+
+    index_dir.mkdir(parents=True, exist_ok=True)
+    with open(index_dir / "chunks.jsonl", "w") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    np.save(index_dir / "embeddings.npy", embeddings)
+    (index_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "embed_model": embedder.model,
+                "files": file_hashes,
+                "chunk_tokens": chunk_tokens,
+                "overlap": overlap,
+            },
+            indent=2,
+        )
+    )
+    return IndexStats(files=len(file_hashes), chunks=len(records), embed_model=embedder.model)
+
+
+_index_cache: dict[str, tuple[tuple[int, int], list[dict], np.ndarray]] = {}
+
+
+def _load_index(index_dir: Path) -> tuple[list[dict], np.ndarray]:
+    stat = (index_dir / "embeddings.npy").stat()
+    key = str(index_dir.resolve())
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _index_cache.get(key)
+    if cached and cached[0] == stamp:
+        return cached[1], cached[2]
+    records = [
+        json.loads(line) for line in (index_dir / "chunks.jsonl").read_text().splitlines()
+    ]
+    embeddings = np.load(index_dir / "embeddings.npy").astype(np.float32)
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    embeddings = embeddings / np.maximum(norms, 1e-12)
+    _index_cache[key] = (stamp, records, embeddings)
+    return records, embeddings
+
+
+def retrieve(query: str, k: int, index_dir: Path, embedder: Embedder) -> list[Chunk]:
+    try:
+        records, embeddings = _load_index(index_dir)
+    except FileNotFoundError:
+        logger.info(f"no RAG index at {index_dir} — run ./locat.sh index-rag")
+        return []
+    if not records:
+        return []
+    query_vector = embedder.embed([query])[0]
+    query_vector = query_vector / max(float(np.linalg.norm(query_vector)), 1e-12)
+    scores = embeddings @ query_vector
+    return [
+        Chunk(
+            text=records[i]["text"],
+            source_path=records[i]["source_path"],
+            page=records[i]["page"],
+            score=float(scores[i]),
+        )
+        for i in np.argsort(scores)[::-1][:k]
+    ]

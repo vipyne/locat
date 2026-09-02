@@ -5,7 +5,7 @@ import httpx
 import numpy as np
 import pytest
 
-from rag import FakeEmbedder, OllamaEmbedder, chunk_text, extract
+from rag import FakeEmbedder, OllamaEmbedder, chunk_text, extract, index, retrieve
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -137,3 +137,66 @@ def test_ollama_embedder_raises_on_http_error():
     embedder = OllamaEmbedder("http://localhost:11434", "nomic-embed-text", client=client)
     with pytest.raises(httpx.HTTPStatusError):
         embedder.embed(["text"])
+
+
+def test_index_writes_aligned_files_and_stats(tmp_path):
+    index_dir = tmp_path / "rag-index"
+    stats = index(FIXTURES, index_dir, FakeEmbedder())
+
+    lines = (index_dir / "chunks.jsonl").read_text().splitlines()
+    embeddings = np.load(index_dir / "embeddings.npy")
+    manifest = json.loads((index_dir / "manifest.json").read_text())
+
+    assert stats.files == 3
+    assert stats.chunks == len(lines) == embeddings.shape[0] > 0
+    assert stats.embed_model == "fake"
+    assert manifest["embed_model"] == "fake"
+    assert manifest["chunk_tokens"] == 500 and manifest["overlap"] == 50
+    assert len(manifest["files"]) == 3
+    for path, digest in manifest["files"].items():
+        assert Path(path).is_absolute()
+        assert len(digest) == 64
+
+
+def test_retrieve_finds_distinctive_chunk_at_top(tmp_path):
+    index_dir = tmp_path / "rag-index"
+    embedder = FakeEmbedder()
+    index(FIXTURES, index_dir, embedder)
+
+    query = " ".join((FIXTURES / "note.txt").read_text().split())
+    chunks = retrieve(query, k=2, index_dir=index_dir, embedder=embedder)
+
+    assert "quokka" in chunks[0].text
+    assert chunks[0].source_path == str((FIXTURES / "note.txt").resolve())
+    assert chunks[0].score == pytest.approx(1.0, abs=1e-5)
+    assert chunks[0].score > chunks[1].score
+
+
+def test_retrieve_missing_index_returns_empty(tmp_path):
+    assert retrieve("anything", 4, tmp_path / "nope", FakeEmbedder()) == []
+
+
+def test_retrieve_empty_index_returns_empty(tmp_path):
+    empty_data = tmp_path / "data"
+    empty_data.mkdir()
+    index_dir = tmp_path / "rag-index"
+    stats = index(empty_data, index_dir, FakeEmbedder())
+    assert stats.files == 0 and stats.chunks == 0
+    assert retrieve("anything", 4, index_dir, FakeEmbedder()) == []
+
+
+def test_reindex_overwrites_and_invalidates_cache(tmp_path):
+    index_dir = tmp_path / "rag-index"
+    embedder = FakeEmbedder()
+    index(FIXTURES, index_dir, embedder)
+    retrieve("warm the cache", 4, index_dir, embedder)
+
+    new_data = tmp_path / "data"
+    new_data.mkdir()
+    (new_data / "only.txt").write_text("A wombat digs a burrow.")
+    stats = index(new_data, index_dir, embedder)
+
+    assert stats.files == 1 and stats.chunks == 1
+    chunks = retrieve("A wombat digs a burrow.", 4, index_dir, embedder)
+    assert len(chunks) == 1
+    assert "wombat" in chunks[0].text
