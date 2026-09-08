@@ -170,6 +170,7 @@ DEFAULT_RAG_DATA_DIR = "data"
 DEFAULT_RAG_TOP_K = 4
 DEFAULT_RAG_CHUNK_TOKENS = 500
 DEFAULT_RAG_CHUNK_OVERLAP = 50
+DEFAULT_STATE_DIR = ".locat"
 DEFAULT_KOKORO_VOICE = "af_heart"
 DEFAULT_GREETING = (
     "Hi. I'm your private, offline financial thinking partner. "
@@ -357,6 +358,14 @@ def rag_chunk_tokens() -> int:
 def rag_chunk_overlap() -> int:
     """Words repeated between consecutive chunks (LOCAT_RAG_CHUNK_OVERLAP, default 50)."""
     return _get_int("LOCAT_RAG_CHUNK_OVERLAP", DEFAULT_RAG_CHUNK_OVERLAP)
+
+
+def state_dir() -> str:
+    """Where locat.sh records the PIDs it owns (LOCAT_STATE_DIR, default
+    ``.locat``). Resolved like ``LOCAT_MODEL_DIR``; locat.sh applies the same
+    repo-relative rule. An ``ollama.pid`` in here means locat started ollama.
+    """
+    return str(_resolve_repo_path(_get("LOCAT_STATE_DIR", DEFAULT_STATE_DIR)))
 
 
 def kokoro_voice() -> str:

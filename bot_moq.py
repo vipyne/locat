@@ -77,6 +77,7 @@ def _locat_config_message() -> dict:
         "type": CONFIG_MESSAGE_TYPE,
         "models": model_entries(),
         "ollama_host": config.ollama_base_url(),
+        "ollama_started_by_locat": (Path(config.state_dir()) / "ollama.pid").is_file(),
         "rag": rag.stats_summary(Path(config.rag_index_dir()), config.rag_data_dir()),
     }
 
