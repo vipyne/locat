@@ -8,7 +8,7 @@ offline (loopback QUIC — no internet).
 
 Run:
     ./locat.sh start
-    # open http://localhost:7860, choose "Media over QUIC" in the dropdown, allow the mic, Connect.
+    # opens http://localhost:7860 (the locat client from client/dist/) — allow the mic, Connect.
 
 Reuses the shared pipeline from pipeline.py (VADProcessor + Whisper/Ollama/Kokoro);
 the ONLY difference from bot_web.py is the transport (MOQParams) and MoQ's event-handler shapes.
@@ -37,6 +37,25 @@ from scripts.print_models import model_entries
 load_dotenv(override=True)
 
 CONFIG_MESSAGE_TYPE = "locat-config"
+
+CLIENT_DIST = Path(__file__).resolve().parent / "client" / "dist"
+
+
+def _serve_client_dist(app) -> None:
+    """Register the locat frontend on the dev runner's FastAPI app.
+
+    The runner has no option for a custom static dir (its `_setup_frontend_routes`
+    hardcodes the pipecat-ai-prebuilt UI, now uninstalled — it logs one startup
+    error about that and mounts nothing). Routes registered before `main()` win.
+    """
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/assets", StaticFiles(directory=CLIENT_DIST / "assets"), name="client-assets")
+
+    @app.get("/", include_in_schema=False)
+    async def client_index():
+        return FileResponse(CLIENT_DIST / "index.html")
 
 
 def _locat_config_message() -> dict:
@@ -110,6 +129,7 @@ if __name__ == "__main__":
     _preflight_stt()
     _preflight_rag()
 
-    from pipecat.runner.run import main
+    from pipecat.runner.run import app, main
 
+    _serve_client_dist(app)
     main()
