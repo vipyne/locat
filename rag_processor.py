@@ -92,13 +92,20 @@ class RAGProcessor(FrameProcessor):
         for chunk in chunks:
             logger.info(f"rag: injecting {_locate(chunk)} (score {chunk.score:.3f})")
         messages = [m for m in context.messages if not _is_excerpts_message(m)]
-        messages.append(
-            {
-                "role": "system",
-                "content": "\n".join(
-                    [EXCERPTS_HEADER, *(f"[{_locate(c)}] {c.text}" for c in chunks)]
-                ),
-            }
-        )
+        excerpts = {
+            "role": "system",
+            "content": "\n".join(
+                [EXCERPTS_HEADER, *(f"[{_locate(c)}] {c.text}" for c in chunks)]
+            ),
+        }
+        # Before the latest user message, never appended after it: a context that
+        # ends with a system turn makes small llama models echo a literal
+        # "assistant" header before their reply (observed with llama3.2:1b).
+        insert_at = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], dict) and messages[i].get("role") == "user":
+                insert_at = i
+                break
+        messages.insert(insert_at, excerpts)
         context.set_messages(messages)
         return query, chunks

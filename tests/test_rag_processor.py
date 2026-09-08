@@ -122,3 +122,24 @@ def test_other_frames_pass_through(tmp_path):
             expected_down_frames=[TextFrame],
         )
     )
+
+
+def test_excerpts_inserted_before_latest_user_message_never_trailing(tmp_path):
+    """A context ending with a system message makes small llama models echo a
+    literal 'assistant' header before their reply (verified against llama3.2:1b)."""
+    processor = RAGProcessor(build_index(tmp_path), FakeEmbedder(), top_k=2)
+    context = LLMContext(
+        messages=[
+            {"role": "system", "content": "be helpful"},
+            {"role": "assistant", "content": "hi there"},
+            {"role": "user", "content": NOTE_TXT_CHUNK},
+        ]
+    )
+    send_context(processor, context)
+
+    roles = [m["role"] for m in context.messages if isinstance(m, dict)]
+    assert roles[-1] == "user"
+    excerpts_index = next(
+        i for i, m in enumerate(context.messages) if m in excerpts_messages(context)
+    )
+    assert excerpts_index == len(context.messages) - 2
