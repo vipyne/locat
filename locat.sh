@@ -13,6 +13,8 @@
 #   ./locat.sh consolidate [-n]            # adopt models from default HF/Ollama dirs (symlinks)
 #   ./locat.sh configure [args]            # delegates to ./configure.sh
 #   ./locat.sh models [args]               # delegates to scripts/print_models.py
+#   ./locat.sh get-debug-log [n]           # bundle the latest (or nth-latest) session log for debugging
+#   ./locat.sh <command> help              # help for one command
 #
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,7 +107,13 @@ cmd_start() {
 
   model_lines
 
-  local bot_log="$STATE_DIR/bot.log"
+  mkdir -p "$STATE_DIR/logs"
+  if [[ -f "$STATE_DIR/bot.log" && ! -L "$STATE_DIR/bot.log" ]]; then
+    mv "$STATE_DIR/bot.log" "$STATE_DIR/logs/bot-00000000-pre-upgrade.log"
+  fi
+  local bot_log="$STATE_DIR/logs/bot-$(date +%Y%m%d-%H%M%S).log"
+  ln -sf "$bot_log" "$STATE_DIR/bot.log"
+  session_logs | tail -n +11 | xargs rm -f
   case "$transport" in
     moq)
       nohup uv run python bot_moq.py -t moq --host localhost --port "$LOCAT_WEB_PORT" >"$bot_log" 2>&1 &
@@ -165,6 +173,70 @@ cmd_stop() {
   return 0
 }
 
+session_logs() {  # newest first; names are timestamped so lexical order is chronological
+  { ls -1 "$STATE_DIR/logs"/bot-*.log 2>/dev/null || true; } | sort -r
+}
+
+cmd_get_debug_log() {
+  local back="${1:-1}" session bundle
+  if ! [[ "$back" =~ ^[1-9][0-9]*$ ]]; then
+    echo "get-debug-log: expected how many sessions back (a number ≥1), got '$back'" >&2
+    exit 1
+  fi
+  session="$(session_logs | sed -n "${back}p")"
+  if [[ -z "$session" ]]; then
+    echo "get-debug-log: no session logs in $STATE_DIR/logs — start the bot at least once (./locat.sh start)" >&2
+    exit 1
+  fi
+  bundle="/tmp/locat-debug-$(date +%Y%m%d-%H%M%S).log"
+  {
+    echo "=== locat debug bundle · $(date) ==="
+    echo "=== session log: $session ==="
+    echo
+    echo "--- locat status at collection time ---"
+    cmd_status
+    echo
+    echo "--- session log ---"
+    cat "$session"
+    echo
+    echo "--- ollama.log (last 200 lines) ---"
+    tail -n 200 "$REPO/ollama.log" 2>/dev/null || echo "(no ollama.log)"
+  } >"$bundle"
+  echo "session: $session"
+  echo "debug bundle: $bundle"
+}
+
+cmd_help() {
+  case "$1" in
+    start)
+      echo "usage: ./locat.sh start [-t moq|headphones]"
+      echo "  -t, --transport   moq (browser over Media-over-QUIC, the default)"
+      echo "                    headphones (local mic/speakers via PyAudio — wear headphones)"
+      echo "  brings up Ollama first if nothing answers on \$OLLAMA_HOST (and records its pid)" ;;
+    stop)
+      echo "usage: ./locat.sh stop"
+      echo "  stops ONLY processes locat started (pids recorded in $STATE_DIR)"
+      echo "  an Ollama you started yourself is reported and left alone" ;;
+    status)
+      echo "usage: ./locat.sh status"
+      echo "  one line each: ollama (with ownership + store), bot, models (full paths), rag index" ;;
+    index-rag)
+      echo "usage: ./locat.sh index-rag"
+      echo "  builds the document index: \$LOCAT_RAG_DATA_DIR (default ./data) → \$LOCAT_RAG_INDEX_DIR"
+      echo "  rebuilds from scratch; run it again after adding/editing/removing documents" ;;
+    get-debug-log)
+      echo "usage: ./locat.sh get-debug-log [n]"
+      echo "  bundles status + the latest session log + ollama.log into one file under /tmp"
+      echo "  n = how many sessions back (default 1 = the most recent); logs live in $STATE_DIR/logs" ;;
+    models)
+      echo "usage: ./locat.sh models [--bare]"
+      echo "  prints the exact STT/LLM/TTS/EMBED models the bot will load, with full weight paths"
+      echo "  --bare   aligned lines only, no header (for embedding in other output)" ;;
+    configure)   exec ./configure.sh -h ;;
+    consolidate) exec uv run python scripts/consolidate.py -h ;;
+  esac
+}
+
 cmd_status() {
   local pid transport
   local store_desc="${OLLAMA_MODELS}"
@@ -200,6 +272,13 @@ cmd_status() {
 
 CMD="${1:-}"
 [[ $# -gt 0 ]] && shift
+case "${1:-}" in
+  help|-h|--help)
+    case "$CMD" in
+      start|stop|status|index-rag|get-debug-log|models|configure|consolidate)
+        cmd_help "$CMD"; exit 0 ;;
+    esac ;;
+esac
 case "$CMD" in
   start)      cmd_start "$@" ;;
   stop)       cmd_stop ;;
@@ -208,6 +287,7 @@ case "$CMD" in
   consolidate) exec uv run python scripts/consolidate.py "$@" ;;
   configure)  exec ./configure.sh "$@" ;;
   models)     exec uv run python scripts/print_models.py "$@" ;;
+  get-debug-log) cmd_get_debug_log "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "locat: unknown command '$CMD' (try ./locat.sh -h)" >&2; exit 1 ;;
 esac

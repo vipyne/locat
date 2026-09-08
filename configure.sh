@@ -25,7 +25,8 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
-[[ -f .env ]] && { set -a; source .env; set +a; }
+ENV_FILE="${LOCAT_ENV_FILE:-.env}"
+[[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
 # .env first (it may set LOCAT_MODEL_DIR), then resolve the one model directory
 # and export HF_HOME / OLLAMA_MODELS / LOCAT_PIPER_DOWNLOAD_DIR / KOKORO_* from it.
 LOCAT_REPO_ROOT="$REPO"
@@ -536,6 +537,8 @@ PY
   [[ -z "$pairs" ]] && return 0
   while IFS='|' read -r tag gb; do
     [[ -z "$tag" || -z "$gb" ]] && continue
+    # Embedding models aren't conversation LLMs — keep them out of the catalog.
+    [[ "${tag%%:*}" == "${EMBED_MODEL%%:*}" || "$tag" == *embed* ]] && continue
     dup=0
     for entry in "${LLM_CATALOG[@]}"; do
       [[ "${entry%%|*}" == "$tag" ]] && { dup=1; break; }
@@ -614,11 +617,25 @@ CAS_NAMES=(); CAS_ROWS=(); CAS_WNAMES=(); CAS_WGBS=()
 compute_cascades() {
   (( ${#CAS_NAMES[@]} )) && return 0  # already computed
   local rows quality balanced snappy bal_stt bal_gb q_stt q_gb sn_stt sn_gb
-  rows="$(sorted_catalog_rows | awk -F'|' '$1==0 && $7 !~ /thinking|reasoning/')"
+  # Note-based filter first; the tag check also catches reasoning-model families
+  # merged from `ollama list`, whose rows carry no note (e.g. an installed deepseek-r1).
+  rows="$(sorted_catalog_rows \
+    | awk -F'|' '$1==0 && $7 !~ /thinking|reasoning/ && $3 !~ /^(deepseek-r1|qwq|magistral|phi4-reasoning|openthinker)/')"
   [[ -z "$rows" ]] && return 0
-  quality="$(echo "$rows" | head -1)"                            # largest that fits ✅
-  balanced="$(echo "$rows" | awk -F'|' '$4>=25{print; exit}')"   # largest at ≥25 tok/s
-  snappy="$(echo "$rows" | awk -F'|' '$4>=100{print; exit}')"    # largest at ≥100 tok/s
+  # Three DISTINCT tiers, even when one model tops every metric (MoE models are
+  # both the largest and among the fastest, which used to collapse all three):
+  # quality = largest that fits; snappy = fastest other model (ties → larger);
+  # balanced = largest remaining at ≥25 tok/s, else the largest remaining.
+  quality="$(echo "$rows" | head -1)"
+  local qtag stag
+  qtag="$(row_tag "$quality")"
+  snappy="$(echo "$rows" | sort -t'|' -k4,4rn -k2,2rn \
+    | awk -F'|' -v q="$qtag" '$3!=q{print; exit}')"
+  stag="$(row_tag "$snappy")"
+  balanced="$(echo "$rows" \
+    | awk -F'|' -v q="$qtag" -v s="$stag" '$4>=25 && $3!=q && $3!=s {print; exit}')"
+  [[ -z "$balanced" ]] && balanced="$(echo "$rows" \
+    | awk -F'|' -v q="$qtag" -v s="$stag" '$3!=q && $3!=s {print; exit}')"
 
   if (( MLX_OK )); then
     bal_stt="LARGE_V3_TURBO"; bal_gb=2
@@ -632,10 +649,8 @@ compute_cascades() {
     sn_stt="BASE";              sn_gb=1
   fi
   add_cascade "balanced"     "$balanced" "$bal_stt" "$bal_gb"
-  [[ "$(row_tag "$quality")" != "$(row_tag "$balanced")" ]] \
-    && add_cascade "best quality" "$quality" "$q_stt" "$q_gb"
-  [[ "$(row_tag "$snappy")" != "$(row_tag "$balanced")" ]] \
-    && add_cascade "snappiest"    "$snappy"  "$sn_stt" "$sn_gb"
+  add_cascade "best quality" "$quality"  "$q_stt"   "$q_gb"
+  add_cascade "snappiest"    "$snappy"   "$sn_stt"  "$sn_gb"
   return 0
 }
 

@@ -35,7 +35,11 @@ def closed_port() -> int:
 
 
 def run_locat(
-    command: str, state_dir: Path, ollama_host: str, **extra_env: str
+    command: str,
+    state_dir: Path,
+    ollama_host: str,
+    extra_args: list[str] | None = None,
+    **extra_env: str,
 ) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
@@ -45,7 +49,12 @@ def run_locat(
         **extra_env,
     }
     return subprocess.run(
-        [LOCAT, command], cwd=REPO, env=env, capture_output=True, text=True, timeout=120
+        [LOCAT, command, *(extra_args or [])],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
 
@@ -181,3 +190,59 @@ def test_status_labels_borrowed_ollama_store(tmp_path):
     )
     assert result.returncode == 0
     assert f"store: borrowed -> {external}" in result.stdout
+
+
+def make_session_logs(state_dir: Path, count: int = 3) -> list[Path]:
+    logs = state_dir / "logs"
+    logs.mkdir(parents=True)
+    paths = []
+    for i in range(count):
+        p = logs / f"bot-2026090{i + 1}-120000.log"
+        p.write_text(f"session {i + 1} content\n")
+        paths.append(p)
+    return paths
+
+
+def test_get_debug_log_bundles_latest_session(tmp_path):
+    make_session_logs(tmp_path)
+    result = run_locat("get-debug-log", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 0
+    bundle = Path(result.stdout.strip().splitlines()[-1].split()[-1])
+    assert bundle.is_file()
+    content = bundle.read_text()
+    assert "session 3 content" in content
+    assert "session 1 content" not in content
+    bundle.unlink()
+
+
+def test_get_debug_log_n_sessions_back(tmp_path):
+    make_session_logs(tmp_path)
+    result = run_locat("get-debug-log", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["2"])
+    assert result.returncode == 0
+    bundle = Path(result.stdout.strip().splitlines()[-1].split()[-1])
+    assert "session 2 content" in bundle.read_text()
+    bundle.unlink()
+
+
+def test_get_debug_log_without_sessions_explains(tmp_path):
+    result = run_locat("get-debug-log", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 1
+    assert "no session logs" in result.stdout + result.stderr
+
+
+def test_per_command_help_configure(tmp_path):
+    result = run_locat("configure", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "-i" in result.stdout and "-v" in result.stdout
+
+
+def test_per_command_help_start(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "moq" in result.stdout and "headphones" in result.stdout
+
+
+def test_per_command_help_models(tmp_path):
+    result = run_locat("models", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "--bare" in result.stdout
