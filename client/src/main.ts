@@ -1,7 +1,7 @@
 import "./style.css";
 import type { TransportState } from "@pipecat-ai/client-js";
 import { createClient, startBot } from "./connection";
-import { attachConfigPanel } from "./panels";
+import { attachConfigPanel, attachRagPanel } from "./panels";
 import { attachTranscript } from "./transcript";
 
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
@@ -9,6 +9,7 @@ const connectionState = document.querySelector<HTMLSpanElement>("#connection-sta
 const transcriptPane = document.querySelector<HTMLElement>("#transcript")!;
 const composer = document.querySelector<HTMLFormElement>("#composer")!;
 const configLines = document.querySelector<HTMLPreElement>("#config-lines")!;
+const ragTurns = document.querySelector<HTMLElement>("#rag-turns")!;
 const textInput = document.querySelector<HTMLInputElement>("#text-input")!;
 const sendButton = document.querySelector<HTMLButtonElement>("#send")!;
 
@@ -30,6 +31,7 @@ function render(state: TransportState): void {
 const client = createClient(render);
 const transcript = attachTranscript(client, transcriptPane);
 attachConfigPanel(client, configLines);
+attachRagPanel(client, ragTurns);
 
 connectButton.addEventListener("click", async () => {
   connectButton.disabled = true;
