@@ -1,9 +1,11 @@
 import "./style.css";
 import type { TransportState } from "@pipecat-ai/client-js";
 import { createClient, startBot } from "./connection";
+import { attachTranscript } from "./transcript";
 
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
+const transcriptPane = document.querySelector<HTMLElement>("#transcript")!;
 
 const IDLE_STATES: TransportState[] = [
   "disconnected",
@@ -18,6 +20,7 @@ function render(state: TransportState): void {
 }
 
 const client = createClient(render);
+attachTranscript(client, transcriptPane);
 
 connectButton.addEventListener("click", async () => {
   connectButton.disabled = true;
