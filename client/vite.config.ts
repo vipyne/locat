@@ -6,5 +6,9 @@ export default defineConfig({
     proxy: {
       "/start": "http://127.0.0.1:7860",
     },
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
 });

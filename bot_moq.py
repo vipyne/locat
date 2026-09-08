@@ -48,9 +48,22 @@ def _serve_client_dist(app) -> None:
     The runner has no option for a custom static dir (its `_setup_frontend_routes`
     hardcodes the pipecat-ai-prebuilt UI, now uninstalled — it logs one startup
     error about that and mounts nothing). Routes registered before `main()` win.
+
+    The COOP/COEP headers make the page cross-origin isolated, which unlocks
+    SharedArrayBuffer: the MoQ player then uses its one-second atomic audio
+    ring instead of the 160ms postMessage fallback that drops the start of
+    every bot utterance. Everything the page loads is same-origin, so the
+    isolation costs nothing.
     """
     from fastapi.responses import FileResponse
     from fastapi.staticfiles import StaticFiles
+
+    @app.middleware("http")
+    async def cross_origin_isolation(request, call_next):
+        response = await call_next(request)
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+        return response
 
     app.mount("/assets", StaticFiles(directory=CLIENT_DIST / "assets"), name="client-assets")
 
@@ -67,9 +80,16 @@ def _locat_config_message() -> dict:
         "rag": rag.stats_summary(Path(config.rag_index_dir()), config.rag_data_dir()),
     }
 
-# MoQ transport with audio in/out. Serve mode (the bot is its own MoQ relay)
+# MoQ transport with audio in/out. Serve mode (the bot is its own MoQ relay).
+# audio_out_max_buffer_ms defaults to 25s, which lets a whole TTS utterance
+# burst onto the wire at once and overflow the browser's playback ring buffer
+# (dropping the start of every bot turn) — cap it near real time instead.
 transport_params = {
-    "moq": lambda: MOQParams(audio_in_enabled=True, audio_out_enabled=True),
+    "moq": lambda: MOQParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_max_buffer_ms=config.moq_audio_ahead_ms(),
+    ),
 }
 
 

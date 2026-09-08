@@ -177,6 +177,7 @@ DEFAULT_GREETING = (
 )
 DEFAULT_GREETING_DELAY_SECS = 1.0
 DEFAULT_MOQ_SUBSCRIBER_TIMEOUT = 15.0
+DEFAULT_MOQ_AUDIO_AHEAD_MS = 500
 DEFAULT_LOG_LEVEL = "DEBUG"
 
 # --- Silero VAD tuning ------------------------------------------------------
@@ -415,6 +416,19 @@ def moq_subscriber_timeout() -> float:
     subscribes is silently dropped. On timeout the bot greets anyway.
     """
     return _get_float("LOCAT_MOQ_SUBSCRIBER_TIMEOUT", DEFAULT_MOQ_SUBSCRIBER_TIMEOUT)
+
+
+def moq_audio_ahead_ms() -> int:
+    """Max milliseconds of bot audio written ahead of real time over MoQ
+    (LOCAT_MOQ_AUDIO_AHEAD_MS).
+
+    TTS generates faster than real time; without a tight cap the whole
+    utterance bursts onto the wire at once and overflows the browser's
+    playback ring buffer, which drops the oldest unplayed samples — the
+    start of every bot turn. Must stay well under the browser ring's
+    one-second capacity; raise only if playback stutters mid-utterance.
+    """
+    return _get_int("LOCAT_MOQ_AUDIO_AHEAD_MS", DEFAULT_MOQ_AUDIO_AHEAD_MS)
 
 
 def log_level() -> str:
