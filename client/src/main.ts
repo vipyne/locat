@@ -5,7 +5,12 @@ import { createClient, startBot } from "./connection";
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
 
-const IDLE_STATES: TransportState[] = ["disconnected", "error"];
+const IDLE_STATES: TransportState[] = [
+  "disconnected",
+  "initializing",
+  "initialized",
+  "error",
+];
 
 function render(state: TransportState): void {
   connectionState.textContent = state;
