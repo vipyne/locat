@@ -15,6 +15,16 @@
     </header>
     <main id="app">
       <section id="transcript" aria-label="conversation transcript"></section>
+      <form id="composer">
+        <input
+          id="text-input"
+          type="text"
+          placeholder="Type a message"
+          autocomplete="off"
+          disabled
+        />
+        <button id="send" type="submit" disabled>Send</button>
+      </form>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

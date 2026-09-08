@@ -48,6 +48,18 @@ button {
   gap: 0.5rem;
 }
 
+#composer {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+#text-input {
+  font: inherit;
+  flex: 1;
+  padding: 0.35rem 0.6rem;
+}
+
 .turn {
   display: flex;
   gap: 0.75rem;

@@ -6,6 +6,9 @@ import { attachTranscript } from "./transcript";
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
 const transcriptPane = document.querySelector<HTMLElement>("#transcript")!;
+const composer = document.querySelector<HTMLFormElement>("#composer")!;
+const textInput = document.querySelector<HTMLInputElement>("#text-input")!;
+const sendButton = document.querySelector<HTMLButtonElement>("#send")!;
 
 const IDLE_STATES: TransportState[] = [
   "disconnected",
@@ -16,11 +19,14 @@ const IDLE_STATES: TransportState[] = [
 
 function render(state: TransportState): void {
   connectionState.textContent = state;
-  connectButton.textContent = IDLE_STATES.includes(state) ? "Connect" : "Disconnect";
+  const idle = IDLE_STATES.includes(state);
+  connectButton.textContent = idle ? "Connect" : "Disconnect";
+  textInput.disabled = idle;
+  sendButton.disabled = idle;
 }
 
 const client = createClient(render);
-attachTranscript(client, transcriptPane);
+const transcript = attachTranscript(client, transcriptPane);
 
 connectButton.addEventListener("click", async () => {
   connectButton.disabled = true;
@@ -34,6 +40,19 @@ connectButton.addEventListener("click", async () => {
     connectionState.textContent = `error: ${error instanceof Error ? error.message : error}`;
   } finally {
     connectButton.disabled = false;
+  }
+});
+
+composer.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = textInput.value.trim();
+  if (!text) return;
+  textInput.value = "";
+  transcript.addUserText(text);
+  try {
+    await client.sendText(text);
+  } catch (error) {
+    connectionState.textContent = `error: ${error instanceof Error ? error.message : error}`;
   }
 });
 

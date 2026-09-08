@@ -7,7 +7,11 @@ import {
 
 const SCROLL_PIN_THRESHOLD_PX = 40;
 
-export function attachTranscript(client: PipecatClient, pane: HTMLElement): void {
+export interface Transcript {
+  addUserText(text: string): void;
+}
+
+export function attachTranscript(client: PipecatClient, pane: HTMLElement): Transcript {
   let pendingUserText: HTMLElement | null = null;
   let botText: HTMLElement | null = null;
   let botSegments = new Map<string, string>();
@@ -62,4 +66,12 @@ export function attachTranscript(client: PipecatClient, pane: HTMLElement): void
       botText.textContent = [...botSegments.values()].join(" ");
     });
   });
+
+  return {
+    addUserText(text: string): void {
+      keepScrolled(() => {
+        addTurn("user").textContent = text;
+      });
+    },
+  };
 }
