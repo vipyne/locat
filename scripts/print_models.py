@@ -163,11 +163,22 @@ def _path_line(found: Path | None) -> str:
         return f"→ {NOT_DOWNLOADED}"
     if not found.exists():
         return f"→ {found}   {NOT_DOWNLOADED}"
-    try:
-        found.resolve().relative_to(Path(config.model_dir()).resolve())
+    store = Path(config.model_dir()).resolve()
+    inside_store = _is_relative_to(Path(os.path.normpath(found)), store)
+    inside_for_real = _is_relative_to(found.resolve(), store)
+    if inside_for_real:
         return f"→ {found}"
+    if inside_store:
+        return f"→ {found}   (borrowed → {found.resolve()})"
+    return f"→ {found}   {OUTSIDE_FLAG}"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
     except ValueError:
-        return f"→ {found}   {OUTSIDE_FLAG}"
+        return False
 
 
 def _stt_line() -> str:

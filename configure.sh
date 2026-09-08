@@ -596,6 +596,7 @@ print_catalog_table() {  # $1 = "numbered" to prefix row numbers (for -i)
     [[ "${1:-}" == "numbered" ]] && prefix="$(printf '%3d)' "$i")"
     printf "  %s %-26s ~%2d GB  ~%3d tok/s  %-22s %-12s %s\n" \
       "$prefix" "$tag" "$gb" "$tok" "$verdict" "$inst" "$note"
+    (( i % 10 == 0 )) && echo
     IFS=$'\n'
   done
   IFS="$OLD_IFS"

@@ -10,13 +10,15 @@
 #   ./locat.sh stop                        # stop only what locat started (recorded PIDs)
 #   ./locat.sh status                      # ownership, bot, models, rag index
 #   ./locat.sh index-rag                   # build/rebuild the document index
+#   ./locat.sh consolidate [-n]            # adopt models from default HF/Ollama dirs (symlinks)
 #   ./locat.sh configure [args]            # delegates to ./configure.sh
 #   ./locat.sh models [args]               # delegates to scripts/print_models.py
 #
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
-[[ -f .env ]] && { set -a; source .env; set +a; }
+ENV_FILE="${LOCAT_ENV_FILE:-.env}"
+[[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
 LOCAT_REPO_ROOT="$REPO"
 # shellcheck source=scripts/model_dir.sh
 . "$REPO/scripts/model_dir.sh"
@@ -165,15 +167,19 @@ cmd_stop() {
 
 cmd_status() {
   local pid transport
+  local store_desc="${OLLAMA_MODELS}"
+  if [[ -L "${LOCAT_MODEL_DIR}/ollama" ]]; then
+    store_desc="borrowed -> $(readlink "${LOCAT_MODEL_DIR}/ollama")"
+  fi
   pid="$(recorded_pid ollama)"
   if ollama_up; then
     if pid_alive "$pid"; then
-      echo "ollama   running (pid $pid), started by locat, store: ${OLLAMA_MODELS}"
+      echo "ollama   running (pid $pid), started by locat, store: ${store_desc}"
     else
       echo "ollama   running, NOT started by locat (your own instance; ./locat.sh stop leaves it alone)"
     fi
   else
-    echo "ollama   not running (./locat.sh start brings it up)"
+    echo "ollama   not running (./locat.sh start brings it up), store: ${store_desc}"
   fi
 
   pid="$(recorded_pid bot)"
@@ -199,6 +205,7 @@ case "$CMD" in
   stop)       cmd_stop ;;
   status)     cmd_status ;;
   index-rag)  exec uv run python rag.py index ;;
+  consolidate) exec uv run python scripts/consolidate.py "$@" ;;
   configure)  exec ./configure.sh "$@" ;;
   models)     exec uv run python scripts/print_models.py "$@" ;;
   -h|--help|help|"") usage ;;

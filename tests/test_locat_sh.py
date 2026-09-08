@@ -39,6 +39,7 @@ def run_locat(
 ) -> subprocess.CompletedProcess:
     env = {
         **os.environ,
+        "LOCAT_ENV_FILE": "/dev/null",
         "LOCAT_STATE_DIR": str(state_dir),
         "OLLAMA_HOST": ollama_host,
         **extra_env,
@@ -151,3 +152,32 @@ def test_stop_leaves_foreign_ollama_alone(tmp_path):
         assert server.poll() is None
     finally:
         server.kill()
+
+
+def test_consolidate_via_locat(tmp_path):
+    model_dir = tmp_path / "models"
+    (model_dir / "huggingface" / "hub").mkdir(parents=True)
+    result = run_locat(
+        "consolidate",
+        tmp_path / "state",
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_MODEL_DIR=str(model_dir),
+    )
+    assert result.returncode == 0
+    assert f"browse everything: ls -al {model_dir}" in result.stdout
+
+
+def test_status_labels_borrowed_ollama_store(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    external = tmp_path / "home-ollama"
+    external.mkdir()
+    (model_dir / "ollama").symlink_to(external)
+    result = run_locat(
+        "status",
+        tmp_path / "state",
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_MODEL_DIR=str(model_dir),
+    )
+    assert result.returncode == 0
+    assert f"store: borrowed -> {external}" in result.stdout

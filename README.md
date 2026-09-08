@@ -269,6 +269,61 @@ Bot code reaches all of this through exactly two functions, `rag.index(...)`
 and `rag.retrieve(...)` — everything behind them (pypdf extraction, chunking,
 Ollama embeddings, numpy cosine) is an implementation detail of `rag.py`.
 
+### Is it really reading my documents? The canary trick
+
+Plant a fact the model cannot possibly know, and ask for it:
+
+```bash
+echo "The secret passphrase for the tax vault is BLUE PELICAN 47." > data/canary.txt
+./locat.sh index-rag
+./locat.sh start -t headphones
+```
+
+Ask *"what's the passphrase for the tax vault?"* — a correct answer can only
+have come from retrieval, and `tail -f .locat/bot.log | grep "rag:"` shows the
+exact file, page, and score injected on every turn. The same canary also
+demonstrates the index lifecycle: delete `data/canary.txt` and ask again
+without re-indexing — the bot still answers, because it reads the built index,
+never `data/` itself. Re-run `./locat.sh index-rag` and ask a third time — now
+the passphrase is gone. Moral: the index only changes when you rebuild it.
+
+For a negative control, `mv models/rag-index /tmp/` and restart: the bot logs
+`no RAG index found` and runs ungrounded. To inspect the index directly,
+`uv run python rag.py stats`, or grep `models/rag-index/chunks.jsonl` — it's
+plain JSON.
+
+---
+
+## One place for all models: consolidate
+
+HuggingFace defaults to `~/.cache/huggingface`, Ollama to `~/.ollama/models` —
+so models you pulled before locat (or outside it) are invisible to the repo
+store, and worse, invisible models get silently re-downloaded.
+`./locat.sh consolidate` adopts them into `LOCAT_MODEL_DIR` with symlinks, so
+one `ls -al ./models` shows every model with its real path:
+
+```bash
+./locat.sh consolidate -n   # dry run: print what would be adopted
+./locat.sh consolidate      # create the links
+```
+
+- **HuggingFace, per model:** each model in your home cache that the locat
+  store lacks becomes a symlink inside `models/huggingface/hub/`, loadable
+  through `LOCAT_MODEL_DIR` like any owned model. A broken partial download in
+  the locat store is replaced by a link to a complete external copy.
+- **Ollama, whole store:** models share content-addressed blobs, so adoption
+  links `models/ollama -> ~/.ollama/models` when the locat store is empty. If
+  both stores contain models, consolidate reports the conflict and touches
+  nothing (skipped while an ollama server is running).
+
+Nothing outside the repo is ever moved, modified, or deleted; the only writes
+are symlinks (plus removal of locat-owned 0-byte `.incomplete` stubs).
+`./locat.sh status` and `./locat.sh models` label adopted models
+`(borrowed → /real/path)`. Borrowed means borrowed: a re-download of that
+model follows the symlink into your home cache, and zipping up the repo
+excludes borrowed weights — delete the link and `ollama pull` /
+`uv run python scripts/prefetch_models.py` to own a copy instead.
+
 ---
 
 ## Configuration
