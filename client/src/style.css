@@ -39,8 +39,39 @@ button {
   opacity: 0.75;
 }
 
-#transcript {
+#webtransport-banner {
   margin-top: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+#app {
+  display: grid;
+  grid-template-areas:
+    "transcript panels"
+    "composer panels";
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  grid-template-rows: 1fr auto;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 54rem) {
+  #app {
+    grid-template-areas:
+      "transcript"
+      "composer"
+      "panels";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+}
+
+#transcript {
+  grid-area: transcript;
+  min-height: 12rem;
   max-height: 70vh;
   overflow-y: auto;
   display: flex;
@@ -49,9 +80,9 @@ button {
 }
 
 #composer {
+  grid-area: composer;
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.75rem;
 }
 
 #text-input {
@@ -84,7 +115,8 @@ button {
 }
 
 #panels {
-  margin-top: 1.25rem;
+  grid-area: panels;
+  min-width: 0;
 }
 
 #panels h2 {

@@ -5,6 +5,8 @@ import { attachConfigPanel, attachRagPanel } from "./panels";
 import { attachTranscript } from "./transcript";
 
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
+const muteButton = document.querySelector<HTMLButtonElement>("#mute")!;
+const webtransportBanner = document.querySelector<HTMLDivElement>("#webtransport-banner")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
 const transcriptPane = document.querySelector<HTMLElement>("#transcript")!;
 const composer = document.querySelector<HTMLFormElement>("#composer")!;
@@ -24,6 +26,7 @@ function render(state: TransportState): void {
   connectionState.textContent = state;
   const idle = IDLE_STATES.includes(state);
   connectButton.textContent = idle ? "Connect" : "Disconnect";
+  muteButton.disabled = idle;
   textInput.disabled = idle;
   sendButton.disabled = idle;
 }
@@ -48,6 +51,11 @@ connectButton.addEventListener("click", async () => {
   }
 });
 
+muteButton.addEventListener("click", () => {
+  client.enableMic(!client.isMicEnabled);
+  muteButton.textContent = client.isMicEnabled ? "Mute" : "Unmute";
+});
+
 composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = textInput.value.trim();
@@ -60,5 +68,10 @@ composer.addEventListener("submit", async (event) => {
     connectionState.textContent = `error: ${error instanceof Error ? error.message : error}`;
   }
 });
+
+if (typeof WebTransport === "undefined") {
+  webtransportBanner.hidden = false;
+  connectButton.disabled = true;
+}
 
 render(client.state);

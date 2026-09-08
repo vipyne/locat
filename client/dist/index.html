@@ -4,17 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>locat</title>
-    <script type="module" crossorigin src="./assets/index--V2-xwoS.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-UH20X0Qw.css">
+    <script type="module" crossorigin src="./assets/index-e2J3GpwZ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-EUwDOV5z.css">
   </head>
   <body>
     <header>
       <h1>locat</h1>
       <div id="controls">
         <button id="connect">Connect</button>
+        <button id="mute" disabled>Mute</button>
         <span id="connection-state">disconnected</span>
       </div>
     </header>
+    <div id="webtransport-banner" hidden>
+      This browser can't open a WebTransport connection, which locat needs to
+      stream audio. Use a recent Chrome or Edge.
+    </div>
     <main id="app">
       <section id="transcript" aria-label="conversation transcript"></section>
       <form id="composer">
