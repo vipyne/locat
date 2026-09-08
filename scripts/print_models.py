@@ -90,23 +90,32 @@ def _faster_whisper_repo(value: str) -> str:
         return f"Systran/faster-whisper-{value}"
 
 
-def _stt_file() -> Path | None:
+def stt_repo_id() -> str | None:
+    """HF repo id the configured STT engine loads weights from.
+
+    None when the engine has no single fixed repo (moonshine) or the
+    configuration doesn't resolve (pipecat missing, invalid model name).
+    """
     engine = config.stt_engine()
     try:
         if engine == "whisper_mlx":
             from pipecat.services.whisper.stt import MLXModel
 
-            return _hf_repo_file(MLXModel[config.whisper_model()].value)
+            return MLXModel[config.whisper_model()].value
         if engine == "faster_whisper":
             from pipecat.services.whisper.stt import Model
 
-            repo = _faster_whisper_repo(Model[config.faster_whisper_model()].value)
-            return _hf_repo_file(repo)
-        if engine == "moonshine":
-            return _hf_glob_file("models--UsefulSensors--moonshine")
+            return _faster_whisper_repo(Model[config.faster_whisper_model()].value)
     except (ImportError, KeyError):
         return None
     return None
+
+
+def _stt_file() -> Path | None:
+    if config.stt_engine() == "moonshine":
+        return _hf_glob_file("models--UsefulSensors--moonshine")
+    repo = stt_repo_id()
+    return _hf_repo_file(repo) if repo else None
 
 
 def _ollama_manifest(store: Path, tag: str) -> Path | None:

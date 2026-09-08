@@ -30,7 +30,7 @@ from pipecat.transports.moq.transport import MOQParams
 from pipecat.workers.runner import WorkerRunner
 
 import rag
-from bot import _configure_logging, _preflight_llm, _preflight_rag
+from bot import _configure_logging, _preflight_llm, _preflight_rag, _preflight_stt
 from pipeline import build_pipeline
 from scripts.print_models import model_entries
 
@@ -107,6 +107,7 @@ async def bot(runner_args: RunnerArguments) -> None:
 if __name__ == "__main__":
     _configure_logging()
     _preflight_llm(config.llm_model(), config.ollama_base_url())
+    _preflight_stt()
     _preflight_rag()
 
     from pipecat.runner.run import main

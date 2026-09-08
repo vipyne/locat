@@ -115,7 +115,7 @@ def consolidate(
     return actions
 
 
-def _default_external_hf_hub(model_dir: Path) -> Path:
+def default_external_hf_hub(model_dir: Path) -> Path:
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     hub = cache_home / "huggingface" / "hub"
     if hub.resolve() == (model_dir / "huggingface" / "hub").resolve():
@@ -153,7 +153,7 @@ def main() -> None:
     model_dir = Path(config.model_dir())
     actions = consolidate(
         model_dir=model_dir,
-        external_hf_hub=_default_external_hf_hub(model_dir),
+        external_hf_hub=default_external_hf_hub(model_dir),
         external_ollama=_default_external_ollama(model_dir),
         ollama_store_in_use=_ollama_server_up(),
         dry_run=args.dry_run,
