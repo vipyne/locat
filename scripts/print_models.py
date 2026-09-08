@@ -27,6 +27,8 @@ import config  # noqa: E402
 OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
 NOT_DOWNLOADED = "(not downloaded yet)"
 
+_WEIGHT_SUFFIXES = {".safetensors", ".bin", ".npz", ".onnx", ".pt"}
+
 
 def _hf_caches() -> list[Path]:
     caches = [Path(os.environ["HF_HOME"]), Path.home() / ".cache" / "huggingface"]
@@ -37,21 +39,40 @@ def _hf_caches() -> list[Path]:
     return seen
 
 
-def _newest_weights_file(snapshots: Path) -> Path | None:
+def _snapshot_dirs(snapshots: Path) -> list[Path]:
+    """The repo's local snapshot dirs, the refs/main one first, rest newest-first."""
+    dirs = sorted(
+        (d for d in snapshots.iterdir() if d.is_dir()),
+        key=lambda d: d.stat().st_mtime,
+        reverse=True,
+    )
     ref = snapshots.parent / "refs" / "main"
-    candidates = []
-    if ref.is_file() and (snapshots / ref.read_text().strip()).is_dir():
-        candidates = [snapshots / ref.read_text().strip()]
-    else:
-        candidates = sorted(
-            (d for d in snapshots.iterdir() if d.is_dir()),
-            key=lambda d: d.stat().st_mtime,
-            reverse=True,
-        )
-    for snap in candidates:
+    if ref.is_file():
+        pinned = snapshots / ref.read_text().strip()
+        if pinned.is_dir():
+            dirs = [pinned] + [d for d in dirs if d != pinned]
+    return dirs
+
+
+def _newest_weights_file(snapshots: Path) -> Path | None:
+    for snap in _snapshot_dirs(snapshots):
         files = [p for p in snap.rglob("*") if p.is_file()]
         if files:
             return max(files, key=lambda p: p.stat().st_size)
+    return None
+
+
+def hf_weights_snapshot(hub: Path, repo_id: str) -> Path | None:
+    """The repo's best local snapshot dir under this hub that holds a real
+    weight file. Metadata-only snapshots don't count, and neither do dangling
+    symlinks into blobs/ — the trace an interrupted download leaves behind.
+    """
+    snapshots = hub / ("models--" + repo_id.replace("/", "--")) / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    for snap in _snapshot_dirs(snapshots):
+        if any(p.suffix in _WEIGHT_SUFFIXES and p.is_file() for p in snap.rglob("*")):
+            return snap
     return None
 
 

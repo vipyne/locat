@@ -297,10 +297,13 @@ plain JSON.
 ## One place for all models: consolidate
 
 HuggingFace defaults to `~/.cache/huggingface`, Ollama to `~/.ollama/models` —
-so models you pulled before locat (or outside it) are invisible to the repo
-store, and worse, invisible models get silently re-downloaded.
-`./locat.sh consolidate` adopts them into `LOCAT_MODEL_DIR` with symlinks, so
-one `ls -al ./models` shows every model with its real path:
+models you pulled before locat (or outside it) live there, and locat uses them
+from there automatically: the bot loads weights straight from whichever cache
+has them, and `./locat.sh status` / `./locat.sh models` print the real path.
+`./locat.sh consolidate` is an optional convenience on top — it adopts external
+models into `LOCAT_MODEL_DIR` with symlinks so one `ls -al ./models` browses
+every model with its real path (and shows what a zip-and-go copy of the repo
+would actually include):
 
 ```bash
 ./locat.sh consolidate -n   # dry run: print what would be adopted

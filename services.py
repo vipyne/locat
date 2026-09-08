@@ -19,9 +19,14 @@ beyond importing config (which pins the repo-local model-cache env vars).
 
 import config
 
+import os
 import sys
 from pathlib import Path
 
+from loguru import logger
+
+from scripts.consolidate import default_external_hf_hub
+from scripts.print_models import hf_weights_snapshot, stt_repo_id
 from spoken_text_filter import SpokenTextFilter
 
 
@@ -32,6 +37,42 @@ def _engine_exit(engine: str, extra: str, exc: Exception) -> "None":
         f"  Install it:  uv sync --extra {extra}\n"
         f"  (or pick a different engine with ./configure.sh -i)\n"
     )
+
+
+def stt_weights_location(repo_id: str) -> tuple[str, Path] | None:
+    """Where the configured STT model's weights sit on this machine.
+
+    ("store", snapshot_dir) when the locat store ($HF_HOME) holds them,
+    ("external", snapshot_dir) when only a fallback Hugging Face cache does,
+    None when no local cache has real weight files.
+    """
+    store_hub = Path(os.environ["HF_HOME"]) / "hub"
+    snapshot = hf_weights_snapshot(store_hub, repo_id)
+    if snapshot is not None:
+        return "store", snapshot
+    external_hub = default_external_hf_hub(Path(config.model_dir()))
+    snapshot = hf_weights_snapshot(external_hub, repo_id)
+    if snapshot is not None:
+        return "external", snapshot
+    return None
+
+
+def _stt_model_arg(configured: str) -> str:
+    """The model value handed to the STT service: the configured name when the
+    locat store holds the weights (the service resolves it through $HF_HOME),
+    or the external cache's snapshot path so the model loads from where it
+    already is — no download, no symlinks. Both whisper backends accept a local
+    directory (mlx_whisper path_or_hf_repo / faster_whisper model_size_or_path).
+    """
+    repo_id = stt_repo_id()
+    if repo_id is None:
+        return configured
+    location = stt_weights_location(repo_id)
+    if location is None or location[0] == "store":
+        return configured
+    snapshot = location[1]
+    logger.info(f"STT '{repo_id}' loading weights from external cache: {snapshot}")
+    return str(snapshot)
 
 
 def build_stt():
@@ -47,13 +88,17 @@ def build_stt():
         from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 
         model = MLXModel[config.whisper_model()]
-        return WhisperSTTServiceMLX(settings=WhisperSTTServiceMLX.Settings(model=model))
+        return WhisperSTTServiceMLX(
+            settings=WhisperSTTServiceMLX.Settings(model=_stt_model_arg(model.value))
+        )
 
     if engine == "faster_whisper":
         from pipecat.services.whisper.stt import Model, WhisperSTTService
 
         model = Model[config.faster_whisper_model()]
-        return WhisperSTTService(settings=WhisperSTTService.Settings(model=model.value))
+        return WhisperSTTService(
+            settings=WhisperSTTService.Settings(model=_stt_model_arg(model.value))
+        )
 
     if engine == "moonshine":
         try:

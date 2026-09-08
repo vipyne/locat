@@ -16,7 +16,6 @@ all hardware/model construction happens inside the builder functions and `main()
 
 import asyncio
 import json
-import os
 import sys
 import urllib.error
 import urllib.request
@@ -42,8 +41,8 @@ import rag
 
 # Pipeline assembly (VAD/STT/LLM/TTS/context) lives in pipeline.py, shared by all bots.
 from pipeline import build_pipeline
-from scripts.consolidate import default_external_hf_hub
 from scripts.print_models import stt_repo_id
+from services import stt_weights_location
 
 
 def build_transport() -> "LocalAudioTransport":
@@ -135,45 +134,26 @@ def _preflight_llm(model: str, base_url: str) -> None:
     logger.info(f"LLM preflight OK: '{model}' available at {base_url}")
 
 
-_WEIGHT_SUFFIXES = {".safetensors", ".bin", ".npz", ".onnx", ".pt"}
-
-
-def _hf_snapshot_has_weights(hub: Path, repo_id: str) -> bool:
-    """True when a local snapshot of the repo holds at least one real weights
-    file. Metadata-only snapshots don't count, and neither do dangling symlinks
-    into blobs/ — the trace an interrupted download's *.incomplete stub leaves.
-    """
-    snapshots = hub / ("models--" + repo_id.replace("/", "--")) / "snapshots"
-    if not snapshots.is_dir():
-        return False
-    return any(p.suffix in _WEIGHT_SUFFIXES and p.is_file() for p in snapshots.rglob("*"))
-
-
 def _preflight_stt() -> None:
-    """Fail fast when the configured STT model's weights are not on disk.
+    """Fail fast when the configured STT model's weights are in NO local cache.
 
     Without this, the first utterance triggers a silent multi-GB Hugging Face
     download (progress bars are disabled in config.py) and the bot just seems
-    deaf until it finishes.
+    deaf until it finishes. Weights found in any cache are fine as-is:
+    services.build_stt() loads them from wherever they live.
     """
     repo_id = stt_repo_id()
     if repo_id is None:
         return
-    store_hub = Path(os.environ["HF_HOME"]) / "hub"
-    if _hf_snapshot_has_weights(store_hub, repo_id):
-        logger.info(f"STT preflight OK: '{repo_id}' weights present in {store_hub}")
-        return
-    external_hub = default_external_hf_hub(Path(config.model_dir()))
-    if _hf_snapshot_has_weights(external_hub, repo_id):
+    location = stt_weights_location(repo_id)
+    if location is None:
         sys.exit(
-            f"\n✖ STT model '{repo_id}' has no weights in {store_hub}\n"
-            f"  A complete copy exists in {external_hub} — adopt it:  ./locat.sh consolidate\n"
+            f"\n✖ STT model '{repo_id}' has no weights in any local Hugging Face cache\n"
+            f"  Without them the first utterance triggers a silent multi-GB download.\n"
+            f"  Fetch them now:  uv run python scripts/prefetch_models.py\n"
         )
-    sys.exit(
-        f"\n✖ STT model '{repo_id}' has no weights in {store_hub}\n"
-        f"  Without them the first utterance triggers a silent multi-GB download.\n"
-        f"  Fetch them now:  uv run python scripts/prefetch_models.py\n"
-    )
+    kind, snapshot = location
+    logger.info(f"STT preflight OK: '{repo_id}' weights present ({kind}): {snapshot}")
 
 
 def _preflight_rag() -> None:
