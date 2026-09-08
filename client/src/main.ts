@@ -1,14 +1,32 @@
 import "./style.css";
+import type { TransportState } from "@pipecat-ai/client-js";
+import { createClient, startBot } from "./connection";
 
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
 
-function setConnectionState(state: string): void {
+const IDLE_STATES: TransportState[] = ["disconnected", "error"];
+
+function render(state: TransportState): void {
   connectionState.textContent = state;
+  connectButton.textContent = IDLE_STATES.includes(state) ? "Connect" : "Disconnect";
 }
 
-connectButton.addEventListener("click", () => {
-  setConnectionState("transport not wired yet");
+const client = createClient(render);
+
+connectButton.addEventListener("click", async () => {
+  connectButton.disabled = true;
+  try {
+    if (IDLE_STATES.includes(client.state)) {
+      await client.connect(await startBot());
+    } else {
+      await client.disconnect();
+    }
+  } catch (error) {
+    connectionState.textContent = `error: ${error instanceof Error ? error.message : error}`;
+  } finally {
+    connectButton.disabled = false;
+  }
 });
 
-setConnectionState("disconnected");
+render(client.state);

@@ -108,7 +108,7 @@ cmd_start() {
   local bot_log="$STATE_DIR/bot.log"
   case "$transport" in
     moq)
-      nohup uv run python bot_moq.py --host localhost --port "$LOCAT_WEB_PORT" >"$bot_log" 2>&1 &
+      nohup uv run python bot_moq.py -t moq --host localhost --port "$LOCAT_WEB_PORT" >"$bot_log" 2>&1 &
       ;;
     headphones)
       echo "start: launching the local-audio bot — use headphones 🎧"
