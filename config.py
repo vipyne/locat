@@ -176,6 +176,7 @@ DEFAULT_GREETING = (
     "What's on your mind today?"
 )
 DEFAULT_GREETING_DELAY_SECS = 1.0
+DEFAULT_MOQ_SUBSCRIBER_TIMEOUT = 15.0
 DEFAULT_LOG_LEVEL = "DEBUG"
 
 # --- Silero VAD tuning ------------------------------------------------------
@@ -404,6 +405,16 @@ def greeting_delay_secs() -> float:
     """
     raw = os.getenv("LOCAT_GREETING_DELAY_SECS", "").strip()
     return float(raw) if raw else DEFAULT_GREETING_DELAY_SECS
+
+
+def moq_subscriber_timeout() -> float:
+    """Max seconds the MoQ bot holds its greeting for the browser's audio
+    subscription (LOCAT_MOQ_SUBSCRIBER_TIMEOUT).
+
+    MoQ is live media with no replay — a greeting spoken before the browser
+    subscribes is silently dropped. On timeout the bot greets anyway.
+    """
+    return _get_float("LOCAT_MOQ_SUBSCRIBER_TIMEOUT", DEFAULT_MOQ_SUBSCRIBER_TIMEOUT)
 
 
 def log_level() -> str:

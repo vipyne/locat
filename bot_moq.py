@@ -17,6 +17,7 @@ the ONLY difference from bot_web.py is the transport (MOQParams) and MoQ's event
 # config FIRST — sets HF_HOME / Kokoro cache paths before any pipecat/HF import (see config.py).
 import config
 
+import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -72,14 +73,44 @@ transport_params = {
 }
 
 
+async def wait_for_audio_subscriber(
+    transport, client_ready: asyncio.Event, timeout: float
+) -> bool:
+    """Hold the greeting until the browser can actually hear it.
+
+    MoQ is live media with no replay: audio written before the bot's audio
+    track is open is dropped inside ``publish_audio``, and audio sent before
+    the browser subscribes to that track is never delivered. The installed
+    moq bindings (moq_rs 0.3.3) expose no subscriber signal — ``AudioProducer``
+    has no ``used()`` — so this waits on the closest real signals instead:
+    the track being open, plus the client's RTVI ``client-ready`` (sent only
+    after the browser has wired up its audio pipeline). Returns False if
+    either signal is still missing after ``timeout`` seconds.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while transport._client._audio_out is None:
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    try:
+        await asyncio.wait_for(client_ready.wait(), max(deadline - loop.time(), 0))
+    except TimeoutError:
+        return False
+    return True
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     """Assemble and run the pipeline for one connected browser client (over MoQ).
     """
     built = build_pipeline(transport)
     worker = PipelineWorker(built.pipeline, params=PipelineParams())
 
+    client_ready = asyncio.Event()
+
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
+        client_ready.set()
         logger.info("RTVI client ready — sending locat-config")
         await rtvi.send_server_message(_locat_config_message())
 
@@ -87,7 +118,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # (no client argument).
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport):
-        logger.info("MoQ client subscribed — greeting")
+        timeout = config.moq_subscriber_timeout()
+        logger.info("MoQ client connected — waiting for its audio subscription")
+        if not await wait_for_audio_subscriber(transport, client_ready, timeout):
+            logger.warning(
+                f"no audio subscriber confirmed after {timeout}s — greeting may be clipped"
+            )
+        logger.info("greeting")
         await worker.queue_frames([TTSSpeakFrame(config.greeting())])
 
     # A browser tab closing surfaces as the peer's broadcast going away
