@@ -1,10 +1,12 @@
 """Offline RAG over the user's documents. Bot code only calls index() / retrieve()."""
 
+import csv
 import hashlib
 import json
 import re
 import sys
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 from typing import Protocol
 
@@ -31,8 +33,36 @@ def extract(path: Path) -> list[PageText]:
             PageText(text=page.extract_text(), source_path=source_path, page=number)
             for number, page in enumerate(PdfReader(path).pages, start=1)
         ]
+    if suffix == ".csv":
+        return _extract_csv(path, source_path)
     logger.info(f"skipping {source_path}: unsupported extension")
     return []
+
+
+def _extract_csv(path: Path, source_path: str) -> list[PageText]:
+    """Each row becomes a self-describing 'header: value, …' sentence.
+
+    Labeling every value keeps a row meaningful after chunking separates it
+    from the header line, and the trailing period makes each row a sentence
+    boundary so chunk_text never splits a row down the middle.
+    """
+    with path.open(newline="") as handle:
+        rows = list(csv.reader(handle))
+    if len(rows) < 2:
+        return []
+    header = rows[0]
+    lines = []
+    for row in rows[1:]:
+        cells = [
+            f"{name.strip()}: {value.strip()}" if name.strip() else value.strip()
+            for name, value in zip_longest(header, row, fillvalue="")
+            if value.strip()
+        ]
+        if cells:
+            lines.append(", ".join(cells) + ".")
+    if not lines:
+        return []
+    return [PageText(text="\n".join(lines), source_path=source_path, page=None)]
 
 
 class Embedder(Protocol):

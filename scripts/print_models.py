@@ -190,17 +190,17 @@ def _tts_file() -> Path | None:
 
 def _path_line(found: Path | None) -> str:
     if found is None:
-        return f"→ {NOT_DOWNLOADED}"
+        return f"  → {NOT_DOWNLOADED}"
     if not found.exists():
-        return f"→ {found}   {NOT_DOWNLOADED}"
+        return f"  → {found}   {NOT_DOWNLOADED}"
     store = Path(config.model_dir()).resolve()
     inside_store = _is_relative_to(Path(os.path.normpath(found)), store)
     inside_for_real = _is_relative_to(found.resolve(), store)
     if inside_for_real:
-        return f"→ {found}"
+        return f"  → {found}"
     if inside_store:
-        return f"→ {found}   (borrowed → {found.resolve()})"
-    return f"→ {found}   {OUTSIDE_FLAG}"
+        return f"  → {found}   (borrowed → {found.resolve()})"
+    return f"  → {found}   {OUTSIDE_FLAG}"
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -209,6 +209,128 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _home_hf_hub() -> Path:
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+    return cache_home / "huggingface" / "hub"
+
+
+def _home_ollama_store() -> Path:
+    return Path.home() / ".ollama" / "models"
+
+
+def _hf_store_models(hub: Path):
+    for model in sorted(hub.glob("models--*")):
+        snapshots = model / "snapshots"
+        if not snapshots.is_dir():
+            continue
+        weights = _newest_weights_file(snapshots)
+        if weights is None:
+            continue
+        blobs = model / "blobs"
+        size = sum(f.stat().st_size for f in blobs.glob("*") if f.is_file())
+        repo_id = model.name.removeprefix("models--").replace("--", "/")
+        yield repo_id, model.resolve(), size, weights
+
+
+def _ollama_store_models(store: Path):
+    manifests = store / "manifests"
+    if not manifests.is_dir():
+        return
+    for manifest in sorted(p for p in manifests.rglob("*") if p.is_file()):
+        rel = manifest.relative_to(manifests).parts
+        if len(rel) < 3:
+            continue
+        host, middle, variant = rel[0], list(rel[1:-1]), rel[-1]
+        if host == "registry.ollama.ai" and middle and middle[0] == "library":
+            middle = middle[1:]
+        prefix = "" if host == "registry.ollama.ai" else f"{host}/"
+        tag = f"{prefix}{'/'.join(middle)}:{variant}"
+        try:
+            layers = json.loads(manifest.read_text()).get("layers", [])
+        except (OSError, ValueError):
+            continue
+        size = sum(layer.get("size", 0) for layer in layers)
+        blob = next(
+            (
+                store / "blobs" / layer["digest"].replace(":", "-")
+                for layer in layers
+                if layer.get("mediaType", "").endswith("model")
+            ),
+            manifest,
+        )
+        yield tag, size, blob
+
+
+def _voice_files(directory: Path):
+    if directory.is_dir():
+        yield from sorted(
+            p for p in directory.iterdir() if p.is_file() and not p.name.startswith(".")
+        )
+
+
+def downloaded_entries() -> list[dict]:
+    """Every model actually on disk, across the locat store AND the tools' home caches."""
+    entries: list[dict] = []
+
+    seen_dirs: set[Path] = set()
+    for hub in [Path(os.environ["HF_HOME"]) / "hub", _home_hf_hub()]:
+        for repo_id, real_dir, size, weights in _hf_store_models(hub):
+            if real_dir in seen_dirs:
+                continue
+            seen_dirs.add(real_dir)
+            entries.append({"kind": "hf", "name": repo_id, "bytes": size, "path": str(weights)})
+
+    seen_tags: set[str] = set()
+    for store in [Path(config.ollama_models_dir()), _home_ollama_store()]:
+        for tag, size, blob in _ollama_store_models(store):
+            if tag in seen_tags:
+                continue
+            seen_tags.add(tag)
+            entries.append({"kind": "ollama", "name": tag, "bytes": size, "path": str(blob)})
+
+    for path in _voice_files(Path(config.kokoro_model_path()).parent):
+        entries.append(
+            {"kind": "kokoro", "name": path.name, "bytes": path.stat().st_size, "path": str(path)}
+        )
+    for path in _voice_files(Path(config.piper_download_dir())):
+        entries.append(
+            {"kind": "piper", "name": path.name, "bytes": path.stat().st_size, "path": str(path)}
+        )
+    return entries
+
+
+def _human_size(size: int) -> str:
+    if size >= 2**30:
+        return f"{size / 2**30:.1f} GB"
+    if size >= 2**20:
+        return f"{size / 2**20:.0f} MB"
+    return f"{size / 2**10:.0f} KB"
+
+
+def _outside_store(path: Path) -> bool:
+    return not _is_relative_to(path.resolve(), Path(config.model_dir()).resolve())
+
+
+def _print_downloaded() -> None:
+    entries = downloaded_entries()
+    if not entries:
+        print("no models downloaded yet (uv run python scripts/prefetch_models.py)")
+        return
+    any_outside = any(_outside_store(Path(e["path"])) for e in entries)
+    if any_outside:
+        print(f"⚠️  = outside LOCAT_MODEL_DIR ({config.model_dir()})")
+        print("")
+    total = sum(e["bytes"] for e in entries)
+    name_width = max(len(e["name"]) for e in entries)
+    for entry in sorted(entries, key=lambda e: (e["kind"], -e["bytes"])):
+        flag = "   ⚠️" if _outside_store(Path(entry["path"])) else ""
+        print(
+            f"{entry['kind']:<8}{entry['name']:<{name_width + 2}}"
+            f"{_human_size(entry['bytes']):>9}  {entry['path']}{flag}"
+        )
+    print(f"{'total':<8}{'':<{name_width + 2}}{_human_size(total):>9}")
 
 
 def _stt_line() -> str:
@@ -259,6 +381,10 @@ def model_entries() -> list[dict]:
 
 
 def main() -> None:
+    # --downloaded / -d: inventory of everything on disk instead of the configured four.
+    if {"--downloaded", "-d"} & set(sys.argv[1:]):
+        _print_downloaded()
+        return
     # --bare: just the aligned lines, no "models:" prefix or blank lines
     # (configure.sh prints its own section header above them).
     bare = "--bare" in sys.argv[1:]

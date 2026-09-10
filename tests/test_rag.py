@@ -207,3 +207,48 @@ def test_has_index_flips_after_indexing(tmp_path):
     assert not has_index(index_dir)
     index(FIXTURES, index_dir, FakeEmbedder())
     assert has_index(index_dir)
+
+
+CSV_CONTENT = """\
+date,description,amount
+2026-03-01,rent,2000
+2026-03-02,groceries,150.75
+2026-03-03,,42
+"""
+
+
+def test_extract_csv_rows_labeled_with_headers(tmp_path):
+    path = tmp_path / "statement.csv"
+    path.write_text(CSV_CONTENT)
+
+    pages = extract(path)
+
+    assert len(pages) == 1
+    assert pages[0].page is None
+    assert pages[0].source_path == str(path.resolve())
+    assert "date: 2026-03-01, description: rent, amount: 2000." in pages[0].text
+    assert "date: 2026-03-03, amount: 42." in pages[0].text  # empty cell skipped
+
+
+def test_extract_csv_rows_survive_chunking_whole(tmp_path):
+    header = "date,description,amount\n"
+    rows = "".join(f"2026-03-{i:02d},thing number {i} with several words,{i * 10}\n" for i in range(1, 60))
+    path = tmp_path / "big.csv"
+    path.write_text(header + rows)
+
+    chunks = chunk_text(extract(path)[0].text, chunk_tokens=40, overlap=5)
+
+    assert len(chunks) > 1
+    for chunk in chunks:
+        for line in chunk.split("\n"):
+            if line.startswith("date: "):
+                assert line.endswith("."), f"row split mid-way: {line!r}"
+
+
+def test_extract_csv_header_only_yields_nothing(tmp_path):
+    path = tmp_path / "empty.csv"
+    path.write_text("date,description,amount\n")
+
+    pages = extract(path)
+
+    assert pages == [] or pages[0].text.strip() == ""

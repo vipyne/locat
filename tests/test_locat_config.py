@@ -10,7 +10,7 @@ def test_locat_config_message_shape():
     assert [m["role"] for m in message["models"]] == ["STT", "LLM", "TTS", "EMBED"]
     for entry in message["models"]:
         assert entry["model"]
-        assert entry["path"].startswith("→")
+        assert entry["path"].lstrip().startswith("→")
     assert message["ollama_host"].startswith("http")
     assert isinstance(message["ollama_started_by_locat"], bool)
     assert message["rag"].startswith(("index:", "no index"))

@@ -229,9 +229,10 @@ cmd_help() {
       echo "  bundles status + the latest session log + ollama.log into one file under /tmp"
       echo "  n = how many sessions back (default 1 = the most recent); logs live in $STATE_DIR/logs" ;;
     models)
-      echo "usage: ./locat.sh models [--bare]"
+      echo "usage: ./locat.sh models [--bare|-d|--downloaded]"
       echo "  prints the exact STT/LLM/TTS/EMBED models the bot will load, with full weight paths"
-      echo "  --bare   aligned lines only, no header (for embedding in other output)" ;;
+      echo "  --bare             aligned lines only, no header (for embedding in other output)"
+      echo "  -d, --downloaded   inventory of EVERY model on disk (locat store + home caches), with sizes" ;;
     configure)   exec ./configure.sh -h ;;
     consolidate) exec uv run python scripts/consolidate.py -h ;;
   esac

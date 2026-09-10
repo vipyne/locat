@@ -250,7 +250,7 @@ bot's entire lifecycle is the one-time, anonymous model download in step 2.
 ## RAG (documents)
 
 The bot can ground its answers in your own documents — fully offline, no vector
-database. Drop `.txt`, `.md`, or `.pdf` files into `./data/`, then:
+database. Drop `.txt`, `.md`, `.pdf`, or `.csv` files into `./data/`, then:
 
 ```bash
 ollama pull nomic-embed-text   # one-time, while online
@@ -268,6 +268,12 @@ runs without document grounding.
 Bot code reaches all of this through exactly two functions, `rag.index(...)`
 and `rag.retrieve(...)` — everything behind them (pypdf extraction, chunking,
 Ollama embeddings, numpy cosine) is an implementation detail of `rag.py`.
+
+CSV files are indexed row by row: the first row is read as the header and each
+data row becomes a self-describing line like `date: 2026-03-01, description:
+rent, amount: 2000.` — so a retrieved chunk still carries its column names
+even when it lands far from the top of the file, and chunks never split a row
+in half. Bank-statement exports work as-is.
 
 ### Is it really reading my documents? The canary trick
 
