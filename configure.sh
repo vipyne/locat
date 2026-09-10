@@ -62,9 +62,10 @@ Usage:
 Options:
   -v, --verbose            full capability matrix + model catalogs
   -i, --interactive        guided model picker (the only mode that writes)
-  -a, --all                do not trim the LLM catalog to what this machine
-                           can actually run
   -h, --help               this help
+
+The untrimmed catalogs (every model, including ones too big for this machine)
+moved to: ./locat.sh status -v
 
 Environment:
   LOCAT_CONFIGURE_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
@@ -86,6 +87,8 @@ EOF
 VERBOSE=0
 INTERACTIVE=0
 SHOW_ALL=0
+HARDWARE_ONLY=0
+CATALOGS_ONLY=0
 HF_CMD=0; HF_REPO=""; HF_QUANT="Q4_K_M"
 if [[ "${1:-}" == "huggingface" ]]; then
   HF_CMD=1
@@ -99,7 +102,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -v|--verbose)     VERBOSE=1 ;;
     -i|--interactive) INTERACTIVE=1 ;;
-    -a|--all)         SHOW_ALL=1 ;;
+    # Plumbing for ./locat.sh status — print one section and exit.
+    --hardware)       HARDWARE_ONLY=1 ;;
+    --catalogs)       CATALOGS_ONLY=1; SHOW_ALL=1 ;;
     -h|--help)        usage; exit 0 ;;
     "")               ;;
     *) echo "configure: unknown option '$1' (try ./configure.sh -h)" >&2; exit 1 ;;
@@ -419,7 +424,7 @@ load_catalog() {
 
 catalog_mtime() { stat -f %m "$CATALOG_CACHE" 2>/dev/null || stat -c %Y "$CATALOG_CACHE" 2>/dev/null || echo 0; }
 
-if (( VERBOSE || INTERACTIVE )); then refresh_catalog; fi
+if (( VERBOSE || INTERACTIVE || CATALOGS_ONLY )); then refresh_catalog; fi
 load_catalog
 
 # Memory bandwidth (GB/s) — decode speed of a q4 LLM is bandwidth-bound, so
@@ -1109,6 +1114,33 @@ fi
 # =============================================================================
 # Default / verbose modes (read-only).
 # =============================================================================
+print_all_catalogs() {
+  echo "~ LLM catalog ~"
+  echo
+  echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; ./locat.sh status -v for everything"))"
+  print_catalog_table
+  echo "  (pick interactively with ./configure.sh -i)"
+  echo
+  echo
+  echo "~ STT catalog ~"
+  echo
+  print_stt_groups plain
+  echo
+  echo "~ TTS catalog ~"
+  echo
+  print_tts_groups plain
+}
+
+if (( HARDWARE_ONLY )); then
+  print_hardware_profile
+  exit 0
+fi
+if (( CATALOGS_ONLY )); then
+  probe_engine_support
+  print_all_catalogs
+  exit 0
+fi
+
 echo "configure: hardware check"
 if (( MLX_OK )); then
   pass "Apple Silicon Mac (${CHIP})"
@@ -1177,20 +1209,5 @@ if (( VERBOSE )); then
   echo
   echo "configure: model catalogs"
   echo
-  echo "~ LLM catalog ~"
-  echo
-  echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; --all for everything"))"
-  print_catalog_table
-  echo "  (pick interactively with ./configure.sh -i)"
-  echo
-
-  echo
-  echo "~ STT catalog ~"
-  echo
-  print_stt_groups plain
-
-  echo
-  echo "~ TTS catalog ~"
-  echo
-  print_tts_groups plain
+  print_all_catalogs
 fi

@@ -242,7 +242,71 @@ def test_per_command_help_start(tmp_path):
     assert "moq" in result.stdout and "headphones" in result.stdout
 
 
-def test_per_command_help_models(tmp_path):
-    result = run_locat("models", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+def test_models_command_removed(tmp_path):
+    result = run_locat("models", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 1
+    assert "unknown command" in result.stderr
+
+
+def test_configure_all_flag_removed(tmp_path):
+    result = run_locat("configure", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["-a"])
+    assert result.returncode == 1
+    assert "unknown option" in result.stderr
+
+
+def isolated_store_env(tmp_path: Path) -> dict:
+    model_dir = tmp_path / "models"
+    (model_dir / "huggingface" / "hub").mkdir(parents=True)
+    (tmp_path / "home").mkdir()
+    (tmp_path / "xdg").mkdir()
+    # config.py setdefaults the kokoro/piper paths into os.environ on first
+    # import, so an earlier test importing it leaks the real store into this
+    # env via **os.environ — pin every store-derived var explicitly.
+    return {
+        "LOCAT_MODEL_DIR": str(model_dir),
+        "HF_HOME": str(model_dir / "huggingface"),
+        "OLLAMA_MODELS": str(model_dir / "ollama"),
+        "LOCAT_KOKORO_MODEL_PATH": str(model_dir / "kokoro" / "kokoro-v1.0.onnx"),
+        "LOCAT_KOKORO_VOICES_PATH": str(model_dir / "kokoro" / "voices-v1.0.bin"),
+        "LOCAT_PIPER_DOWNLOAD_DIR": str(model_dir / "piper"),
+        "XDG_CACHE_HOME": str(tmp_path / "xdg"),
+        "HOME": str(tmp_path / "home"),
+    }
+
+
+def test_status_shows_machine_and_downloaded_sections(tmp_path):
+    result = run_locat(
+        "status",
+        tmp_path / "state",
+        f"127.0.0.1:{closed_port()}",
+        **isolated_store_env(tmp_path),
+    )
     assert result.returncode == 0
-    assert "--bare" in result.stdout
+    assert "machine" in result.stdout
+    assert "chip:" in result.stdout
+    assert "downloaded" in result.stdout
+    assert "no models downloaded yet" in result.stdout
+
+
+def test_status_verbose_shows_full_catalogs(tmp_path):
+    env = isolated_store_env(tmp_path)
+    catalog = Path(env["LOCAT_MODEL_DIR"]) / ".llm-catalog"
+    catalog.write_text(
+        "# generated 9999999999 2099-01-01 models=2\n"
+        "status-test-model:7b|5||\n"
+        "way-too-big-model:999b|999||\n"
+    )
+    result = run_locat(
+        "status",
+        tmp_path / "state",
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["-v"],
+        LOCAT_CATALOG_MAX_AGE_DAYS="0",
+        **env,
+    )
+    assert result.returncode == 0
+    assert "LLM catalog" in result.stdout
+    assert "status-test-model:7b" in result.stdout
+    assert "way-too-big-model:999b" in result.stdout  # untrimmed, like old configure -a
+    assert "STT catalog" in result.stdout
+    assert "TTS catalog" in result.stdout

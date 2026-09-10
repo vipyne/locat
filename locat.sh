@@ -8,11 +8,10 @@
 # Usage:
 #   ./locat.sh start [-t moq|headphones]   # bring up Ollama if needed, then the bot (default: moq)
 #   ./locat.sh stop                        # stop only what locat started (recorded PIDs)
-#   ./locat.sh status                      # ownership, bot, models, rag index
+#   ./locat.sh status [-v]                 # machine, ownership, bot, models (configured + downloaded), rag; -v adds full catalogs
 #   ./locat.sh index-rag                   # build/rebuild the document index
 #   ./locat.sh consolidate [-n]            # adopt models from default HF/Ollama dirs (symlinks)
 #   ./locat.sh configure [args]            # delegates to ./configure.sh
-#   ./locat.sh models [args]               # delegates to scripts/print_models.py
 #   ./locat.sh get-debug-log [n]           # bundle the latest (or nth-latest) session log for debugging
 #   ./locat.sh <command> help              # help for one command
 #
@@ -218,8 +217,11 @@ cmd_help() {
       echo "  stops ONLY processes locat started (pids recorded in $STATE_DIR)"
       echo "  an Ollama you started yourself is reported and left alone" ;;
     status)
-      echo "usage: ./locat.sh status"
-      echo "  one line each: ollama (with ownership + store), bot, models (full paths), rag index" ;;
+      echo "usage: ./locat.sh status [-v]"
+      echo "  machine hardware, ollama (ownership + store), bot, configured models (full paths),"
+      echo "  rag index, and an inventory of every model on disk with sizes"
+      echo "  -v, --verbose   also print the full STT/LLM/TTS catalogs (every model, even ones"
+      echo "                  too big for this machine)" ;;
     index-rag)
       echo "usage: ./locat.sh index-rag"
       echo "  builds the document index: \$LOCAT_RAG_DATA_DIR (default ./data) → \$LOCAT_RAG_INDEX_DIR"
@@ -228,17 +230,24 @@ cmd_help() {
       echo "usage: ./locat.sh get-debug-log [n]"
       echo "  bundles status + the latest session log + ollama.log into one file under /tmp"
       echo "  n = how many sessions back (default 1 = the most recent); logs live in $STATE_DIR/logs" ;;
-    models)
-      echo "usage: ./locat.sh models [--bare|-d|--downloaded]"
-      echo "  prints the exact STT/LLM/TTS/EMBED models the bot will load, with full weight paths"
-      echo "  --bare             aligned lines only, no header (for embedding in other output)"
-      echo "  -d, --downloaded   inventory of EVERY model on disk (locat store + home caches), with sizes" ;;
     configure)   exec ./configure.sh -h ;;
     consolidate) exec uv run python scripts/consolidate.py -h ;;
   esac
 }
 
 cmd_status() {
+  local verbose=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose) verbose=1 ;;
+      *) echo "locat: unknown status option '$1' (try ./locat.sh status help)" >&2; exit 1 ;;
+    esac
+    shift
+  done
+
+  echo "machine"
+  ./configure.sh --hardware
+
   local pid transport
   local store_desc="${OLLAMA_MODELS}"
   if [[ -L "${LOCAT_MODEL_DIR}/ollama" ]]; then
@@ -269,6 +278,16 @@ cmd_status() {
 
   model_lines --bare
   echo "rag      $(rag_line)"
+
+  echo
+  echo "downloaded"
+  uv run python scripts/print_models.py -d 2>/dev/null | sed 's/^/  /' \
+    || echo "  (could not resolve models — run 'uv sync' and retry)"
+
+  if (( verbose )); then
+    echo
+    ./configure.sh --catalogs
+  fi
 }
 
 CMD="${1:-}"
@@ -276,18 +295,17 @@ CMD="${1:-}"
 case "${1:-}" in
   help|-h|--help)
     case "$CMD" in
-      start|stop|status|index-rag|get-debug-log|models|configure|consolidate)
+      start|stop|status|index-rag|get-debug-log|configure|consolidate)
         cmd_help "$CMD"; exit 0 ;;
     esac ;;
 esac
 case "$CMD" in
   start)      cmd_start "$@" ;;
   stop)       cmd_stop ;;
-  status)     cmd_status ;;
+  status)     cmd_status "$@" ;;
   index-rag)  exec uv run python rag.py index ;;
   consolidate) exec uv run python scripts/consolidate.py "$@" ;;
   configure)  exec ./configure.sh "$@" ;;
-  models)     exec uv run python scripts/print_models.py "$@" ;;
   get-debug-log) cmd_get_debug_log "$@" ;;
   -h|--help|help|"") usage ;;
   *) echo "locat: unknown command '$CMD' (try ./locat.sh -h)" >&2; exit 1 ;;

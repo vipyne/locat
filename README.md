@@ -305,7 +305,8 @@ plain JSON.
 HuggingFace defaults to `~/.cache/huggingface`, Ollama to `~/.ollama/models` —
 models you pulled before locat (or outside it) live there, and locat uses them
 from there automatically: the bot loads weights straight from whichever cache
-has them, and `./locat.sh status` / `./locat.sh models` print the real path.
+has them, and `./locat.sh status` prints the real path (its `downloaded`
+section inventories every model on disk, with sizes).
 `./locat.sh consolidate` is an optional convenience on top — it adopts external
 models into `LOCAT_MODEL_DIR` with symlinks so one `ls -al ./models` browses
 every model with its real path (and shows what a zip-and-go copy of the repo
@@ -327,8 +328,7 @@ would actually include):
 
 Nothing outside the repo is ever moved, modified, or deleted; the only writes
 are symlinks (plus removal of locat-owned 0-byte `.incomplete` stubs).
-`./locat.sh status` and `./locat.sh models` label adopted models
-`(borrowed → /real/path)`. Borrowed means borrowed: a re-download of that
+`./locat.sh status` labels adopted models `(borrowed → /real/path)`. Borrowed means borrowed: a re-download of that
 model follows the symlink into your home cache, and zipping up the repo
 excludes borrowed weights — delete the link and `ollama pull` /
 `uv run python scripts/prefetch_models.py` to own a copy instead.
