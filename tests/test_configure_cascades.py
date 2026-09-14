@@ -79,3 +79,49 @@ def test_reasoning_models_never_recommended_even_without_catalog_note(tmp_path):
 
     assert "deepseek-r1:16b" not in tiers.values()
     assert "noted-thinker:32b" not in tiers.values()
+
+
+def write_fake_manifest(store: Path, name: str, tag: str, total_bytes: int) -> None:
+    import json
+
+    manifest = store / "manifests" / "registry.ollama.ai" / "library" / name / tag
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "layers": [
+                    {
+                        "mediaType": "application/vnd.ollama.image.model",
+                        "digest": "sha256:deadbeef",
+                        "size": total_bytes,
+                    }
+                ]
+            }
+        )
+    )
+
+
+def test_installed_model_size_is_decimal_gb_like_every_other_catalog_source(tmp_path):
+    """The manifest fallback must agree with `ollama list`, fetch_catalog.py and the
+    seed array, which are all decimal GB. 15e9 bytes = 15 GB = 13.97 GiB, so a
+    binary computation mislabeled "GB" would print 14."""
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    (model_dir / ".llm-catalog").write_text("# generated 9999999999 2099-01-01 models=1\ntiny:3b|2||\n")
+    write_fake_manifest(model_dir / "ollama", "fakeinstalled", "9b", 15_000_000_000)
+    env = {
+        **os.environ,
+        "LOCAT_ENV_FILE": "/dev/null",
+        "LOCAT_MODEL_DIR": str(model_dir),
+        "OLLAMA_MODELS": str(model_dir / "ollama"),
+        "OLLAMA_HOST": f"127.0.0.1:{closed_port()}",
+        "LOCAT_CATALOG_MAX_AGE_DAYS": "0",
+        "LOCAT_CONFIGURE_RAM_GB": "48",
+    }
+    result = subprocess.run(
+        [str(REPO / "configure.sh"), "--catalogs"],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    row = next(l for l in result.stdout.splitlines() if "fakeinstalled:9b" in l)
+    assert "~15 GB" in row, row

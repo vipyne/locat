@@ -535,7 +535,9 @@ for dirpath, _, files in os.walk(root):
                 total = sum(l.get("size", 0) for l in json.load(fh).get("layers", []))
         except (OSError, ValueError):
             continue
-        print(f"{tag}|{-(-total // 2**30)}")
+        # Decimal GB, matching `ollama list`, fetch_catalog.py and the seed
+        # array — every size in this column must use the same ruler.
+        print(f"{tag}|{max(1, round(total / 1e9))}")
 PY
 )"
   fi

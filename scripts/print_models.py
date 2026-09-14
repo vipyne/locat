@@ -302,11 +302,13 @@ def downloaded_entries() -> list[dict]:
 
 
 def _human_size(size: int) -> str:
+    """Binary units, labeled as such — HuggingFace and Ollama report decimal GB
+    for the same files, so 22.8 GiB here is the 24.6 GB shown on a model page."""
     if size >= 2**30:
-        return f"{size / 2**30:.1f} GB"
+        return f"{size / 2**30:.1f} GiB"
     if size >= 2**20:
-        return f"{size / 2**20:.0f} MB"
-    return f"{size / 2**10:.0f} KB"
+        return f"{size / 2**20:.0f} MiB"
+    return f"{size / 2**10:.0f} KiB"
 
 
 def _outside_store(path: Path) -> bool:

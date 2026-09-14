@@ -182,3 +182,11 @@ def test_dash_d_is_alias_for_downloaded(tmp_path, monkeypatch, capsys):
     main()
 
     assert "no models downloaded yet" in capsys.readouterr().out
+
+
+def test_human_size_uses_binary_unit_labels():
+    from scripts.print_models import _human_size
+
+    assert _human_size(3 * 2**30) == "3.0 GiB"
+    assert _human_size(5 * 2**20) == "5 MiB"
+    assert _human_size(7 * 2**10) == "7 KiB"
