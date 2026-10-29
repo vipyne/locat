@@ -40,7 +40,16 @@ from bot import (
     _preflight_rag,
     _preflight_stt,
 )
-from pipeline import OFFLINE_MODE, ONLINE_MODE, build_pipeline, public_rag_summary
+from modes import (
+    OFFLINE_MODE,
+    ONLINE_MODE,
+    SERVICES,
+    SessionModes,
+    as_modes,
+    resolve_modes,
+    validate_modes,
+)
+from pipeline import build_pipeline, public_rag_summary
 from scripts.prefetch_models import (
     DAILY_BUNDLE_NAMES,
     daily_bundle_path,
@@ -80,9 +89,18 @@ def _serve_client_dist(app) -> None:
 
     @app.get("/api/locat-mode", include_in_schema=False)
     async def locat_mode():
-        # Which sessions this process serves; the client greys out the
-        # unavailable option in its mode picker.
-        return {"mode": config.serve_mode()}
+        # Which sessions this process serves, plus the raw per-service pins
+        # (each `session`, `offline` or `online`); the client greys out the
+        # unavailable option in its mode picker and disables it outright when
+        # every service is pinned.
+        return {
+            "mode": config.serve_mode(),
+            "service_modes": {
+                "stt": config.stt_mode(),
+                "llm": config.llm_mode(),
+                "tts": config.tts_mode(),
+            },
+        }
 
     @app.get("/daily/{name}", include_in_schema=False)
     async def daily_bundle(name: str):
@@ -106,17 +124,27 @@ def _serve_client_dist(app) -> None:
 
 
 def _preflight_local() -> None:
-    """Run the local-stack preflights, unless this process is online-only.
+    """Preflight each service a session could still run locally.
 
-    An online-only process speaks to Deepgram/OpenAI/Cartesia, so Ollama,
-    the Whisper weights, and the embed model are all irrelevant to it.
+    An online-only process speaks to Deepgram/OpenAI/Cartesia, so Ollama, the
+    Whisper weights, and the embed model are all irrelevant to it. A hard
+    `online` pin drops that service's preflight the same way; a `session` pin
+    keeps it, since either mode can connect.
     """
     if config.online_only():
         logger.info("online-only process — skipping the local LLM/STT/RAG preflights")
         return
-    _preflight_llm(config.ollama_base_url())
-    _preflight_stt()
-    _preflight_rag()
+    local_brain = config.llm_mode() != ONLINE_MODE
+    if local_brain:
+        _preflight_llm(config.ollama_base_url())
+    else:
+        logger.info("LLM pinned online — skipping the local LLM and RAG preflights")
+    if config.stt_mode() == ONLINE_MODE:
+        logger.info("STT pinned online — skipping the Whisper preflight")
+    else:
+        _preflight_stt()
+    if local_brain:
+        _preflight_rag()
 
 
 def _requested_mode(runner_args) -> str | None:
@@ -142,10 +170,12 @@ def session_mode(runner_args) -> str:
     """Which stack this connection runs on: `"online"` or `"offline"`.
 
     Offline is the default and the fallback for anything unrecognized. Online
-    is refused up front when any of the three keys is missing, naming them all
-    at once; in an `--online-only` process the refusal runs the other way and
-    a bare connect defaults to online. In an `--offline-only` process an
-    online connect is refused.
+    is refused up front when a key for one of its cloud services is missing,
+    naming them all at once; in an `--online-only` process the refusal runs the
+    other way and a bare connect defaults to online. In an `--offline-only`
+    process an online connect is refused.
+
+    The per-service pins then override this per service (`negotiate_modes`).
     """
     requested = _requested_mode(runner_args)
     if requested == ONLINE_MODE:
@@ -168,7 +198,9 @@ def session_mode(runner_args) -> str:
             "--offline-only."
         )
     if mode == ONLINE_MODE:
-        missing = config.missing_online_keys()
+        # Only the services this session actually sends to the cloud: an
+        # offline STT/TTS pin needs no Deepgram/Cartesia key.
+        missing = config.missing_online_keys(services=resolve_modes(mode).online_services)
         if missing:
             raise RuntimeError(
                 "online session needs cloud credentials — missing from .env: "
@@ -190,13 +222,18 @@ def _ollama_model_ids(base_url: str) -> set[str]:
         return {str(m.get("id", "")) for m in json.load(resp).get("data", [])}
 
 
-def vet_offline_session() -> None:
+def vet_offline_session(session_modes: SessionModes | None = None) -> None:
     """Refuse an offline connect the local stack can't serve, naming the fix.
 
     Mirrors online's missing-keys refusal: the browser shows the error instead
     of a bot that connects, listens, and never answers. Every missing model is
-    named in one message so a user pulls them in one pass.
+    named in one message so a user pulls them in one pass. A cloud brain needs
+    no local model, so a session with `modes.llm == "online"` skips the check
+    even when its ear or mouth stays local.
     """
+    if as_modes(session_modes).llm == ONLINE_MODE:
+        logger.info("LLM online — skipping the local model check")
+        return
     base_url = config.ollama_base_url()
     wanted = _ollama_models_to_check()
     if not wanted:
@@ -226,6 +263,23 @@ def vet_offline_session() -> None:
     logger.info(f"offline session OK: {', '.join(wanted)} available at {base_url}")
 
 
+def negotiate_modes(runner_args) -> SessionModes:
+    """Per-service modes for one connect, refused up front if unservable.
+
+    The connect request picks the session mode, the `LOCAT_*_MODE` pins
+    override it per service, then the whole record is validated (serve flags,
+    cloud keys) and anything still local is vetted against Ollama.
+    """
+    session_modes = resolve_modes(session_mode(runner_args))
+    validate_modes(session_modes)
+    if session_modes.offline_services:
+        vet_offline_session(session_modes)
+    logger.info(
+        "service modes: " + ", ".join(f"{s}={getattr(session_modes, s)}" for s in SERVICES)
+    )
+    return session_modes
+
+
 def _preflight_startup() -> None:
     """Run the local-stack preflights, logging a failure instead of exiting.
 
@@ -240,16 +294,21 @@ def _preflight_startup() -> None:
         )
 
 
-def _locat_config_message(mode: str = OFFLINE_MODE) -> dict:
+def _locat_config_message(modes=None) -> dict:
+    # LLM mode is the brain mode: persona, models and db all key off it, and a
+    # cloud brain only ever summarizes the public index.
+    session_modes = as_modes(modes)
+    brain = session_modes.llm
     rag = (
         public_rag_summary()
-        if mode == ONLINE_MODE
+        if brain == ONLINE_MODE
         else store.stats_summary(Path(config.rag_db_path()), config.rag_data_dir())
     )
     return {
         "type": CONFIG_MESSAGE_TYPE,
-        "mode": mode,
-        "models": model_entries(mode),
+        "mode": brain,
+        "service_modes": {name: getattr(session_modes, name) for name in SERVICES},
+        "models": model_entries(brain),
         "ollama_host": config.ollama_base_url(),
         "ollama_started_by_locat": (Path(config.state_dir()) / "ollama.pid").is_file(),
         "architecture": config.architecture(),
@@ -320,19 +379,20 @@ def _transport_kind(runner_args) -> str:
     return "webrtc" if name == "SmallWebRTCRunnerArguments" else "websocket"
 
 
-def _greeting(mode: str) -> str:
-    """Opening line for the session's mode."""
-    return config.online_greeting() if mode == ONLINE_MODE else config.offline_greeting()
+def _greeting(modes=None) -> str:
+    """Opening line for the session's brain mode."""
+    brain = as_modes(modes).llm
+    return config.online_greeting() if brain == ONLINE_MODE else config.offline_greeting()
 
 
-def _register_webrtc_handlers(transport, worker, mode: str = OFFLINE_MODE) -> None:
+def _register_webrtc_handlers(transport, worker, modes=None) -> None:
     # SmallWebRTC and FastAPIWebsocket handlers receive (transport, client).
     # Audio flows as soon as the connection is up — no subscriber gate needed.
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client):
         await asyncio.sleep(GREETING_SETTLE_SECS)
         logger.info("WebRTC client connected — greeting")
-        await worker.queue_frames([TTSSpeakFrame(_greeting(mode))])
+        await worker.queue_frames([TTSSpeakFrame(_greeting(modes))])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(_transport, _client):
@@ -340,19 +400,17 @@ def _register_webrtc_handlers(transport, worker, mode: str = OFFLINE_MODE) -> No
         await worker.cancel()
 
 
-async def run_bot(
-    transport: BaseTransport, runner_args: RunnerArguments, mode: str = OFFLINE_MODE
-) -> None:
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, modes=None) -> None:
     """Assemble and run the pipeline for one connected browser client."""
-    built = build_pipeline(transport, modes=mode)
+    built = build_pipeline(transport, modes=modes)
     worker = PipelineWorker(built.pipeline, params=PipelineParams())
 
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         logger.info("RTVI client ready — sending locat-config")
-        await rtvi.send_server_message(_locat_config_message(mode))
+        await rtvi.send_server_message(_locat_config_message(modes))
 
-    _register_webrtc_handlers(transport, worker, mode)
+    _register_webrtc_handlers(transport, worker, modes)
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
     try:
@@ -366,13 +424,11 @@ async def run_bot(
 
 async def bot(runner_args: RunnerArguments) -> None:
     """Entry point the Pipecat dev runner discovers and calls per connection."""
-    # Resolve (and vet) the mode before any transport exists, so a refused
+    # Resolve (and vet) the modes before any transport exists, so a refused
     # session never leaves a half-open peer connection behind.
-    mode = session_mode(runner_args)
-    if mode == OFFLINE_MODE:
-        vet_offline_session()
+    session_modes = negotiate_modes(runner_args)
     transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args, mode=mode)
+    await run_bot(transport, runner_args, modes=session_modes)
 
 
 if __name__ == "__main__":

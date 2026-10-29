@@ -46,7 +46,12 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.transports.base_transport import BaseTransport
 
 import ingest
-from modes import OFFLINE_MODE, ONLINE_MODE, SessionModes  # noqa: F401 (constants re-exported)
+from modes import (  # noqa: F401 (constants re-exported)
+    OFFLINE_MODE,
+    ONLINE_MODE,
+    SessionModes,
+    as_modes,
+)
 import store
 import tools
 from rag_agent import grounded_question, strip_think
@@ -542,14 +547,6 @@ def _warn_mixed_session(session_modes: SessionModes) -> None:
         )
 
 
-def _as_modes(value) -> SessionModes:
-    """A SessionModes, or a bare session mode string meaning all three services."""
-    if isinstance(value, SessionModes):
-        return value
-    mode = value if value in (OFFLINE_MODE, ONLINE_MODE) else OFFLINE_MODE
-    return SessionModes(session=mode, stt=mode, llm=mode, tts=mode)
-
-
 def build_pipeline(transport: BaseTransport, modes=None) -> BuiltBot:
     """Assemble the bot for one session.
 
@@ -559,7 +556,7 @@ def build_pipeline(transport: BaseTransport, modes=None) -> BuiltBot:
     key off it — while STT and TTS follow their own modes, so a local brain can
     run with a cloud ear or mouth.
     """
-    session_modes = _as_modes(modes)
+    session_modes = as_modes(modes)
     _warn_mixed_session(session_modes)
     stt = services.stt_for(session_modes.stt)
     tts = services.tts_for(session_modes.tts)

@@ -18,6 +18,8 @@ def fake_keys(monkeypatch):
         monkeypatch.setenv(name, f"fake-{name.lower()}")
     monkeypatch.delenv("LOCAT_ONLINE_ONLY", raising=False)
     monkeypatch.delenv("LOCAT_OFFLINE_ONLY", raising=False)
+    for name in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 class FakeWebSocket:
@@ -191,17 +193,31 @@ def http_client():
 def test_locat_mode_endpoint_reports_both(http_client):
     resp = http_client.get("/api/locat-mode")
     assert resp.status_code == 200
-    assert resp.json() == {"mode": "both"}
+    assert resp.json() == {
+        "mode": "both",
+        "service_modes": {"stt": "session", "llm": "session", "tts": "session"},
+    }
 
 
 def test_locat_mode_endpoint_reports_online_only(http_client, monkeypatch):
     monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
-    assert http_client.get("/api/locat-mode").json() == {"mode": "online-only"}
+    assert http_client.get("/api/locat-mode").json()["mode"] == "online-only"
 
 
 def test_locat_mode_endpoint_reports_offline_only(http_client, monkeypatch):
     monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
-    assert http_client.get("/api/locat-mode").json() == {"mode": "offline-only"}
+    assert http_client.get("/api/locat-mode").json()["mode"] == "offline-only"
+
+
+def test_locat_mode_endpoint_reports_the_raw_pins(http_client, monkeypatch):
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "offline")
+    payload = http_client.get("/api/locat-mode").json()
+    assert payload["service_modes"] == {
+        "stt": "session",
+        "llm": "online",
+        "tts": "offline",
+    }
 
 
 def test_offline_connect_missing_models_lists_all(monkeypatch):
@@ -252,3 +268,117 @@ def test_browser_startup_survives_missing_models(monkeypatch):
     monkeypatch.setattr(bot_browser.logger, "warning", warnings.append)
     bot_browser._preflight_startup()
     assert warnings and "front-model:8b" in warnings[0]
+
+
+# --- per-service negotiation ---------------------------------------------------
+
+
+def modes_for(stt="offline", llm="offline", tts="offline", session="offline"):
+    from modes import SessionModes
+
+    return SessionModes(session=session, stt=stt, llm=llm, tts=tts)
+
+
+def test_llm_pin_overrides_the_requested_mode(monkeypatch):
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    resolved = bot_browser.negotiate_modes(ws_args(mode="offline"))
+    assert (resolved.session, resolved.stt, resolved.llm, resolved.tts) == (
+        "offline",
+        "offline",
+        "online",
+        "offline",
+    )
+
+
+def test_audio_pins_override_an_online_connect(monkeypatch):
+    monkeypatch.setenv("LOCAT_STT_MODE", "offline")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "offline")
+    monkeypatch.setattr(bot_browser, "_ollama_model_ids", lambda url: set())
+    resolved = bot_browser.negotiate_modes(ws_args(mode="online"))
+    assert (resolved.stt, resolved.llm, resolved.tts) == ("offline", "online", "offline")
+
+
+def test_pinned_online_llm_needs_only_the_openai_key(monkeypatch):
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    monkeypatch.delenv("CARTESIA_API_KEY", raising=False)
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    assert bot_browser.negotiate_modes(ws_args()).llm == "online"
+
+
+def test_pinned_online_llm_without_its_key_is_refused(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    with pytest.raises(RuntimeError) as excinfo:
+        bot_browser.negotiate_modes(ws_args())
+    message = str(excinfo.value)
+    assert "OPENAI_API_KEY" in message
+    assert "DEEPGRAM_API_KEY" not in message
+
+
+def test_online_connect_with_an_offline_stt_pin_skips_the_deepgram_key(monkeypatch):
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    monkeypatch.setenv("LOCAT_STT_MODE", "offline")
+    assert bot_browser.session_mode(ws_args(mode="online")) == "online"
+
+
+def test_offline_only_refuses_an_online_pin(monkeypatch):
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "online")
+    with pytest.raises(RuntimeError) as excinfo:
+        bot_browser.negotiate_modes(ws_args())
+    message = str(excinfo.value)
+    assert "--offline-only" in message
+    assert "tts" in message
+
+
+def test_vet_skips_ollama_when_the_llm_is_online(monkeypatch):
+    def boom(url):
+        raise AssertionError("asked Ollama for a session with a cloud brain")
+
+    monkeypatch.setattr(bot_browser, "_ollama_model_ids", boom)
+    bot_browser.vet_offline_session(modes_for(llm="online"))
+
+
+def test_vet_checks_ollama_when_the_llm_is_offline(monkeypatch):
+    asked = []
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_LLM_MODEL", "front-model:8b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "analyst-model:27b")
+    monkeypatch.setattr(
+        bot_browser,
+        "_ollama_model_ids",
+        lambda url: asked.append(url) or {"front-model:8b", "analyst-model:27b"},
+    )
+    bot_browser.vet_offline_session(modes_for(stt="online", llm="offline", tts="online"))
+    assert asked == [config.ollama_base_url()]
+
+
+def test_online_llm_pin_skips_the_llm_and_rag_preflights(monkeypatch):
+    ran = []
+    monkeypatch.setattr(bot_browser, "_preflight_llm", lambda url: ran.append("llm"))
+    monkeypatch.setattr(bot_browser, "_preflight_stt", lambda: ran.append("stt"))
+    monkeypatch.setattr(bot_browser, "_preflight_rag", lambda: ran.append("rag"))
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    bot_browser._preflight_local()
+    assert ran == ["stt"]
+
+
+def test_online_stt_pin_skips_only_the_stt_preflight(monkeypatch):
+    ran = []
+    monkeypatch.setattr(bot_browser, "_preflight_llm", lambda url: ran.append("llm"))
+    monkeypatch.setattr(bot_browser, "_preflight_stt", lambda: ran.append("stt"))
+    monkeypatch.setattr(bot_browser, "_preflight_rag", lambda: ran.append("rag"))
+    monkeypatch.setenv("LOCAT_STT_MODE", "online")
+    bot_browser._preflight_local()
+    assert ran == ["llm", "rag"]
+
+
+def test_session_valued_pins_still_preflight(monkeypatch):
+    ran = []
+    monkeypatch.setattr(bot_browser, "_preflight_llm", lambda url: ran.append("llm"))
+    monkeypatch.setattr(bot_browser, "_preflight_stt", lambda: ran.append("stt"))
+    monkeypatch.setattr(bot_browser, "_preflight_rag", lambda: ran.append("rag"))
+    for name in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        monkeypatch.setenv(name, "session")
+    bot_browser._preflight_local()
+    assert ran == ["llm", "stt", "rag"]

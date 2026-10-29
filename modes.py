@@ -50,6 +50,14 @@ class SessionModes:
 _PINS = {"stt": config.stt_mode, "llm": config.llm_mode, "tts": config.tts_mode}
 
 
+def as_modes(value) -> SessionModes:
+    """A SessionModes, or a bare session mode string meaning all three services."""
+    if isinstance(value, SessionModes):
+        return value
+    mode = value if value in (OFFLINE_MODE, ONLINE_MODE) else OFFLINE_MODE
+    return SessionModes(session=mode, stt=mode, llm=mode, tts=mode)
+
+
 def resolve_modes(session: str | None) -> SessionModes:
     """Fold the session mode and the three pins into one record.
 

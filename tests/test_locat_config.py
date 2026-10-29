@@ -1,9 +1,17 @@
 import json
 import sys
 
+import pytest
+
 import config
 import scripts.print_models as print_models
-from bot_browser import CONFIG_MESSAGE_TYPE, _locat_config_message, build_transport_params
+from bot_browser import (
+    CONFIG_MESSAGE_TYPE,
+    _locat_config_message,
+    build_transport_params,
+    public_rag_summary,
+)
+from modes import SessionModes
 
 
 def test_transport_params_offer_websocket_and_webrtc():
@@ -104,3 +112,26 @@ def test_simple_chat_overrides_online_only(monkeypatch):
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
     assert config.online_only() is False
     assert config.serve_mode() != "online-only"
+
+
+def test_config_message_carries_resolved_service_modes():
+    assert _locat_config_message("offline")["service_modes"] == {
+        "stt": "offline",
+        "llm": "offline",
+        "tts": "offline",
+    }
+
+
+def test_config_message_reports_a_mixed_session(monkeypatch):
+    """A local ear and mouth with a cloud brain: three chips, brain mode wins."""
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-openai")
+    monkeypatch.setattr(
+        config, "rag_db_path", lambda: pytest.fail("mixed session reached for the private db")
+    )
+    message = _locat_config_message(
+        SessionModes(session="offline", stt="offline", llm="online", tts="offline")
+    )
+    assert message["service_modes"] == {"stt": "offline", "llm": "online", "tts": "offline"}
+    assert message["mode"] == "online"
+    assert message["rag"] == public_rag_summary()
+    json.dumps(message)
