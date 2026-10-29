@@ -4,13 +4,17 @@ models/
 # Python virtual environment
 .venv/
 
-# locat.sh runtime state (pidfiles for the processes locat started)
-.locat/
+# lofi.sh runtime state (pidfiles for the processes lofi started)
+.lofi/
 
 # User documents indexed by RAG
 data/
 
-# Local config (copied from env.example; config only, never secrets)
+# Local settings (copied from lofirc.example; config only, never secrets)
+.lofirc
+.lofirc.bak
+
+# Hosted API keys (copied from env.example)
 .env
 .env.bak
 
@@ -20,6 +24,10 @@ __pycache__/
 
 # Scratch/temp
 _verify_tmp.py
+.superpowers/
+
+# Model-sweep eval reports (evals/sweep.sh)
+evals/results/
 
 # Runtime + debug logs
 *.log

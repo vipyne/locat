@@ -12,7 +12,7 @@
 # curated Ollama LLM catalog ranked by fit (memory footprint AND estimated
 # speech latency), and both TTS engines (Kokoro, Piper). Interactive mode walks
 # through choosing an engine+model combo, approves it against the hardware, and
-# (only with your explicit confirmation) writes it to .env, installs missing
+# (only with your explicit confirmation) writes it to .lofirc, installs missing
 # engine support, and pulls missing models. Without -i it never writes.
 #
 # Usage:
@@ -25,11 +25,13 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
-ENV_FILE="${LOCAT_ENV_FILE:-.env}"
+# .lofirc holds settings; LOFI_ENV_FILE repoints it. Keys live in .env, which
+# configure never reads or writes.
+ENV_FILE="${LOFI_ENV_FILE:-.lofirc}"
 [[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
-# .env first (it may set LOCAT_MODEL_DIR), then resolve the one model directory
-# and export HF_HOME / OLLAMA_MODELS / LOCAT_PIPER_DOWNLOAD_DIR / KOKORO_* from it.
-LOCAT_REPO_ROOT="$REPO"
+# Settings first (they may set LOFI_MODEL_DIR), then resolve the one model directory
+# and export HF_HOME / OLLAMA_MODELS / LOFI_PIPER_DOWNLOAD_DIR / KOKORO_* from it.
+LOFI_REPO_ROOT="$REPO"
 # shellcheck source=scripts/model_dir.sh
 . "$REPO/scripts/model_dir.sh"
 
@@ -44,8 +46,8 @@ Usage:
                            size-check a GGUF repo on Hugging Face against this
                            machine's memory, then pull it into the Ollama
                            store as hf.co/<org>/<repo>:<quant> (default quant
-                           Q4_K_M); prints the LOCAT_LLM_MODEL line to use it
-                           but never writes .env
+                           Q4_K_M); prints the LOFI_LLM_MODEL line to use it
+                           but never writes .lofirc
   ./configure.sh -v        the above, plus a full hardware profile (CPU/GPU
                            cores, est. memory bandwidth, disk) and per-slot
                            model catalogs with fit verdicts:
@@ -55,7 +57,7 @@ Usage:
                              TTS  Kokoro, Piper
   ./configure.sh -i        interactively pick an STT/LLM/TTS combo, get it
                            approved against the hardware, then (each step
-                           gated on your confirmation) write it to .env,
+                           gated on your confirmation) write it to .lofirc,
                            install missing engine support, and pull missing
                            models
 
@@ -65,15 +67,15 @@ Options:
   -h, --help               this help
 
 The untrimmed catalogs (every model, including ones too big for this machine)
-moved to: ./locat.sh status -v
+moved to: ./lofi.sh status -v
 
 Environment:
-  LOCAT_CONFIGURE_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
+  LOFI_CONFIGURE_RAM_GB=<n>  pretend the machine has <n> GB RAM (preview what
                            configure would say on a smaller machine)
-  LOCAT_CATALOG_MAX_AGE_DAYS=<n>
+  LOFI_CATALOG_MAX_AGE_DAYS=<n>
                            refetch the ollama.com catalog when the cache is
                            older than <n> days (default 7; 0 never fetches)
-  LOCAT_CATALOG_LIMIT=<n>  LLM rows to keep, best-fitting first (default 60)
+  LOFI_CATALOG_LIMIT=<n>  LLM rows to keep, best-fitting first (default 60)
 
 Runs on macOS (Apple Silicon or Intel) and Linux. Whisper-MLX needs Apple
 Silicon; elsewhere the CPU engines (faster-whisper/Moonshine) are the
@@ -102,7 +104,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -v|--verbose)     VERBOSE=1 ;;
     -i|--interactive) INTERACTIVE=1 ;;
-    # Plumbing for ./locat.sh status — print one section and exit.
+    # Plumbing for ./lofi.sh status — print one section and exit.
     --hardware)       HARDWARE_ONLY=1 ;;
     --catalogs)       CATALOGS_ONLY=1; SHOW_ALL=1 ;;
     -h|--help)        usage; exit 0 ;;
@@ -124,8 +126,8 @@ LLM_CATALOG=(
   "qwen2.5:0.5b|1|"
   "qwen2.5:1.5b|1|"
   "qwen2.5:3b|2|"
-  "qwen2.5:7b|5|"
-  "qwen2.5:14b|10|project default"
+  "qwen2.5:7b|5|project default, "
+  "qwen2.5:14b|10|"
   "qwen2.5:32b|20|"
   "qwen2.5:72b|47|"
   "qwen3:0.6b|1|hybrid thinking"
@@ -134,7 +136,7 @@ LLM_CATALOG=(
   "qwen3:8b|6|hybrid thinking"
   "qwen3:14b|10|hybrid thinking"
   "qwen3:32b|20|hybrid thinking"
-  "llama3.2:1b|1|"
+  "llama3.2:1b|1|tiny"
   "llama3.2:3b|2|"
   "llama3.1:8b|5|"
   "llama3.1:70b|43|"
@@ -162,7 +164,7 @@ LLM_CATALOG=(
   "nemotron-3-super:120b|87|MoE, 12B active|12"
 )
 
-# STT engine tables. services.py builds whichever engine LOCAT_STT_ENGINE selects.
+# STT engine tables. services.py builds whichever engine LOFI_STT_ENGINE selects.
 # Whisper-MLX (Apple GPU): MLXModel member|display GB|GB rounded up|HF repo dir
 WHISPER_TABLE=(
   "TINY|0.2|1|whisper-tiny"
@@ -232,9 +234,9 @@ llm_needs_gb() {
 # yet — under WSL this takes the Linux path.
 OS="$(uname -s)"; ARCH="$(uname -m)"
 MLX_OK=0
-# LOCAT_CONFIGURE_PLATFORM overrides detection for previewing/testing another platform's
-# behavior, e.g.:  LOCAT_CONFIGURE_PLATFORM=Darwin/x86_64 ./configure.sh -v
-EFFECTIVE_PLATFORM="${LOCAT_CONFIGURE_PLATFORM:-${OS}/${ARCH}}"
+# LOFI_CONFIGURE_PLATFORM overrides detection for previewing/testing another platform's
+# behavior, e.g.:  LOFI_CONFIGURE_PLATFORM=Darwin/x86_64 ./configure.sh -v
+EFFECTIVE_PLATFORM="${LOFI_CONFIGURE_PLATFORM:-${OS}/${ARCH}}"
 case "$EFFECTIVE_PLATFORM" in
   Darwin/arm64) PLATFORM="Apple Silicon Mac"; MLX_OK=1 ;;
   Darwin/*)     PLATFORM="Intel Mac" ;;
@@ -261,9 +263,9 @@ else
   CPU_PERF=""; CPU_EFF=""
   OS_VER_LABEL="kernel"; OS_VER="$(uname -r)"
 fi
-# LOCAT_CONFIGURE_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
-# e.g.:  LOCAT_CONFIGURE_RAM_GB=8 ./configure.sh -v
-RAM_GB="${LOCAT_CONFIGURE_RAM_GB:-$DETECTED_RAM}"
+# LOFI_CONFIGURE_RAM_GB overrides detected RAM — preview what fits on a smaller machine,
+# e.g.:  LOFI_CONFIGURE_RAM_GB=8 ./configure.sh -v
+RAM_GB="${LOFI_CONFIGURE_RAM_GB:-$DETECTED_RAM}"
 FREE_DISK="$(df -h . | awk 'NR==2{print $4}')"
 
 # =============================================================================
@@ -321,7 +323,7 @@ PY
   if (( PROBE_STATUS != 0 )); then
     warn "couldn't reach huggingface.co to size the model — offline?"
   elif [[ "$PROBE" == "NOGGUF" ]]; then
-    echo "  ❌ ${HF_REPO} has no GGUF files — locat serves LLMs through Ollama, which"
+    echo "  ❌ ${HF_REPO} has no GGUF files — lofi serves LLMs through Ollama, which"
     echo "     only runs GGUF. Source-weight repos usually have community conversions:"
     echo "       https://huggingface.co/models?search=${HF_REPO#*/}+gguf"
     exit 1
@@ -353,8 +355,8 @@ PY
     exit 1
   fi
   pass "pulled ${HF_TAG}"
-  echo "  to use it, set in .env (configure won't write it for you):"
-  echo "     LOCAT_LLM_MODEL=${HF_TAG}"
+  echo "  to use it, set in ${ENV_FILE} (configure won't write it for you):"
+  echo "     LOFI_LLM_MODEL=${HF_TAG}"
   exit 0
 fi
 
@@ -362,9 +364,9 @@ fi
 # ollama's library changes constantly, so the catalog is fetched and cached
 # rather than hand-maintained. Refresh is weekly and only on the modes that
 # actually show the catalog — never in the background, never on a bare run.
-CATALOG_CACHE="${LOCAT_MODEL_DIR}/.llm-catalog"
-CATALOG_MAX_AGE="${LOCAT_CATALOG_MAX_AGE_DAYS:-7}"   # 0 disables fetching entirely
-CATALOG_LIMIT="${LOCAT_CATALOG_LIMIT:-60}"           # rows kept, most-pulled first
+CATALOG_CACHE="${LOFI_MODEL_DIR}/.llm-catalog"
+CATALOG_MAX_AGE="${LOFI_CATALOG_MAX_AGE_DAYS:-7}"   # 0 disables fetching entirely
+CATALOG_LIMIT="${LOFI_CATALOG_LIMIT:-60}"           # rows kept, most-pulled first
 CATALOG_STATUS=""
 
 refresh_catalog() {
@@ -389,7 +391,7 @@ refresh_catalog() {
 # this machine. --all keeps everything, including models too big to run.
 load_catalog() {
   [[ -s "$CATALOG_CACHE" ]] || { CATALOG_STATUS="built-in list"; return 0; }
-  local line gb fam seen_fams="" kept=() n=0 configured="${LOCAT_LLM_MODEL:-}"
+  local line gb fam seen_fams="" kept=() n=0 configured="${LOFI_LLM_MODEL:-}"
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == \#* ]] && continue
     gb="$(echo "$line" | cut -d'|' -f2)"
@@ -397,11 +399,16 @@ load_catalog() {
     if (( SHOW_ALL == 0 )); then
       (( gb + 4 > RAM_GB )) && continue
       (( n >= CATALOG_LIMIT )) && continue
+      fam="${line%%:*}"
+      # Name filter: skip specialized families (code/math/sql/rerank/embed/
+      # guard/shield) unfit for chat duty. Mirrors fetch_catalog.keep().
+      case "$fam" in
+        *code*|*math*|*sql*|*rerank*|*embed*|*guard*|*shield*) continue ;;
+      esac
       # Cap size variants per family. Without this, a handful of popular
       # families spend the whole budget on their own 7 sizes and the list
       # shows ~11 distinct models. Cache order is largest-first, so the
       # survivors are the biggest that still fit.
-      fam="${line%%:*}"
       case " $seen_fams " in
         *" $fam:$fam "*) continue ;;
         *" $fam "*) seen_fams="$seen_fams $fam:$fam" ;;
@@ -477,7 +484,7 @@ llm_verdict() {  # $1 = total GB (RAM), $2 = active GB (speed; defaults to $1)
 }
 
 # --- Installed-model / engine-support detection (read-only) -----------------
-# OLLAMA_MODELS / HF_HOME / LOCAT_PIPER_DOWNLOAD_DIR are already resolved and exported
+# OLLAMA_MODELS / HF_HOME / LOFI_PIPER_DOWNLOAD_DIR are already resolved and exported
 # by scripts/model_dir.sh at the top of this file.
 INSTALLED_TAGS=""
 if command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1; then
@@ -495,8 +502,8 @@ llm_installed() {
 }
 
 # The embed model is usually configured bare ("nomic-embed-text") while the
-# store tags it ":latest" — match either form, like rag.py's preflight does.
-EMBED_MODEL="${LOCAT_EMBED_MODEL:-nomic-embed-text}"
+# store tags it ":latest" — match either form, like store.py's preflight does.
+EMBED_MODEL="${LOFI_EMBED_MODEL:-nomic-embed-text}"
 embed_installed() {
   local t
   for t in $INSTALLED_TAGS; do
@@ -561,7 +568,7 @@ hf_model_installed() {  # $1 = HF cache dir suffix, e.g. mlx-community--whisper-
 }
 
 piper_voice_installed() {  # $1 = piper voice id
-  [[ -f "${LOCAT_PIPER_DOWNLOAD_DIR}/$1.onnx" ]]
+  [[ -f "${LOFI_PIPER_DOWNLOAD_DIR}/$1.onnx" ]]
 }
 
 # Optional-extra support: *_OK = 1 when the extra's package is importable in the
@@ -940,9 +947,10 @@ if (( INTERACTIVE )); then
   print_slot_reccos llm
   print_catalog_table numbered
   OLD_IFS="$IFS"; IFS=$'\n'; CATALOG_ROWS=( $(sorted_catalog_rows) ); IFS="$OLD_IFS"
-  read -r -p "choose LLM [default ${LOCAT_LLM_MODEL:-qwen2.5:14b}]: " ans || ans=""
+  # must match config.llm_model()'s default (shell can't import Python)
+  read -r -p "choose LLM [default ${LOFI_LLM_MODEL:-qwen2.5:7b}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    CHOSEN_LLM="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+    CHOSEN_LLM="${LOFI_LLM_MODEL:-qwen2.5:7b}"
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#CATALOG_ROWS[@]} )); then
     CHOSEN_LLM="$(echo "${CATALOG_ROWS[$((ans - 1))]}" | cut -d'|' -f3)"
   else
@@ -994,46 +1002,50 @@ if (( INTERACTIVE )); then
 
   # Which model var the chosen STT engine reads (see config.py).
   case "$CHOSEN_STT_ENGINE" in
-    whisper_mlx)    STT_MODEL_VAR="LOCAT_WHISPER_MODEL" ;;
-    faster_whisper) STT_MODEL_VAR="LOCAT_FASTER_WHISPER_MODEL" ;;
-    moonshine)      STT_MODEL_VAR="LOCAT_MOONSHINE_MODEL" ;;
+    whisper_mlx)    STT_MODEL_VAR="LOFI_WHISPER_MODEL" ;;
+    faster_whisper) STT_MODEL_VAR="LOFI_FASTER_WHISPER_MODEL" ;;
+    moonshine)      STT_MODEL_VAR="LOFI_MOONSHINE_MODEL" ;;
   esac
   case "$CHOSEN_TTS_ENGINE" in
-    kokoro) TTS_VOICE_VAR="LOCAT_KOKORO_VOICE" ;;
-    piper)  TTS_VOICE_VAR="LOCAT_PIPER_VOICE" ;;
+    kokoro) TTS_VOICE_VAR="LOFI_KOKORO_VOICE" ;;
+    piper)  TTS_VOICE_VAR="LOFI_PIPER_VOICE" ;;
   esac
   echo
-  echo "  .env lines for this combo:"
-  echo "     LOCAT_STT_ENGINE=${CHOSEN_STT_ENGINE}"
+  echo "  ${ENV_FILE} lines for this combo:"
+  echo "     LOFI_STT_ENGINE=${CHOSEN_STT_ENGINE}"
   echo "     ${STT_MODEL_VAR}=${CHOSEN_STT_MODEL}"
-  echo "     LOCAT_LLM_MODEL=${CHOSEN_LLM}"
-  echo "     LOCAT_TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
+  echo "     LOFI_LLM_MODEL=${CHOSEN_LLM}"
+  echo "     LOFI_TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
   echo "     ${TTS_VOICE_VAR}=${CHOSEN_VOICE}"
+  echo
+  echo "  llmwithbackend architecture (the default: fast front + thinking analyst backend) knobs:"
+  echo "     LOFI_ARCHITECTURE=llmwithbackend         # already the default"
+  echo "     LOFI_RAG_LLM_MODEL=qwen3:8b              # the analyst; needs real API tool calls (nemotron-3-nano fails as the analyst backend)"
   echo
   if (( ! APPROVED )); then
     read -r -p "combo was rejected — continue anyway? [y/N] " ans || ans=""
     [[ "$ans" =~ ^[Yy] ]] || { echo "configure: no changes made"; exit 1; }
   fi
 
-  # --- Apply: write .env (with backup), only the model/engine keys ----------
+  # --- Apply: write .lofirc (with backup), only the model/engine keys -------
   env_set() {  # KEY VALUE — update in place or append; never touches other lines
-    if [[ -f .env ]] && grep -q "^$1=" .env; then
-      sed -i '' "s|^$1=.*|$1=$2|" .env
+    if [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; then
+      sed -i '' "s|^$1=.*|$1=$2|" "$ENV_FILE"
     else
-      echo "$1=$2" >> .env
+      echo "$1=$2" >> "$ENV_FILE"
     fi
   }
-  read -r -p "write these to .env? (existing .env backed up to .env.bak) [y/N] " ans || ans=""
+  read -r -p "write these to ${ENV_FILE}? (existing ${ENV_FILE} backed up to ${ENV_FILE}.bak) [y/N] " ans || ans=""
   if [[ "$ans" =~ ^[Yy] ]]; then
-    [[ -f .env ]] && cp .env .env.bak
-    env_set LOCAT_STT_ENGINE "$CHOSEN_STT_ENGINE"
+    [[ -f "$ENV_FILE" ]] && cp "$ENV_FILE" "${ENV_FILE}.bak"
+    env_set LOFI_STT_ENGINE "$CHOSEN_STT_ENGINE"
     env_set "$STT_MODEL_VAR" "$CHOSEN_STT_MODEL"
-    env_set LOCAT_LLM_MODEL "$CHOSEN_LLM"
-    env_set LOCAT_TTS_ENGINE "$CHOSEN_TTS_ENGINE"
+    env_set LOFI_LLM_MODEL "$CHOSEN_LLM"
+    env_set LOFI_TTS_ENGINE "$CHOSEN_TTS_ENGINE"
     env_set "$TTS_VOICE_VAR" "$CHOSEN_VOICE"
-    pass "wrote .env (LOCAT_STT_ENGINE, ${STT_MODEL_VAR}, LOCAT_LLM_MODEL, LOCAT_TTS_ENGINE, ${TTS_VOICE_VAR})"
+    pass "wrote ${ENV_FILE} (LOFI_STT_ENGINE, ${STT_MODEL_VAR}, LOFI_LLM_MODEL, LOFI_TTS_ENGINE, ${TTS_VOICE_VAR})"
   else
-    echo "  skipped — paste the lines above into .env yourself if you want them"
+    echo "  skipped — paste the lines above into ${ENV_FILE} yourself if you want them"
   fi
 
   # --- Apply: install missing engine support (uv sync --extra ...) ----------
@@ -1073,7 +1085,7 @@ if (( INTERACTIVE )); then
   if (( NEED_LLM || NEED_EMBED || NEED_WHISPER )); then
     echo
     (( NEED_LLM ))     && echo "  missing: LLM ${CHOSEN_LLM}"
-    (( NEED_EMBED ))   && echo "  missing: embed model ${EMBED_MODEL} (RAG — ./locat.sh index-rag needs it)"
+    (( NEED_EMBED ))   && echo "  missing: embed model ${EMBED_MODEL} (RAG — ./lofi.sh index-rag needs it)"
     (( NEED_WHISPER )) && echo "  missing: Whisper-MLX ${CHOSEN_STT_MODEL}"
     read -r -p "pull missing models now? (needs network) [y/N] " ans || ans=""
     if [[ "$ans" =~ ^[Yy] ]]; then
@@ -1084,16 +1096,16 @@ if (( INTERACTIVE )); then
           (( NEED_EMBED )) && ! ollama pull "$EMBED_MODEL" \
             && warn "ollama pull ${EMBED_MODEL} failed — check the tag name and network"
         else
-          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOCAT_LLM_MODEL from .env on startup)"
+          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOFI_LLM_MODEL from .lofirc on startup)"
         fi
       fi
       if (( NEED_WHISPER )); then
         if command -v uv >/dev/null 2>&1; then
-          if ! LOCAT_WHISPER_MODEL="$CHOSEN_STT_MODEL" uv run python scripts/prefetch_models.py; then
-            warn "whisper prefetch failed — retry with: LOCAT_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
+          if ! LOFI_WHISPER_MODEL="$CHOSEN_STT_MODEL" uv run python scripts/prefetch_models.py; then
+            warn "whisper prefetch failed — retry with: LOFI_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
           fi
         else
-          warn "uv not on PATH — install it, then: LOCAT_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
+          warn "uv not on PATH — install it, then: LOFI_WHISPER_MODEL=${CHOSEN_STT_MODEL} uv run python scripts/prefetch_models.py"
         fi
       fi
     else
@@ -1109,7 +1121,7 @@ if (( INTERACTIVE )); then
     && echo "  note: Piper voice ${CHOSEN_VOICE} downloads on first use (needs network once)"
 
   echo
-  echo "configure: ✅ combo ready — ./locat.sh start"
+  echo "configure: ✅ combo ready — ./lofi.sh start"
   exit 0
 fi
 
@@ -1119,7 +1131,7 @@ fi
 print_all_catalogs() {
   echo "~ LLM catalog ~"
   echo
-  echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; ./locat.sh status -v for everything"))"
+  echo "  Ollama (local server · ${CATALOG_STATUS:-built-in list}$( (( SHOW_ALL )) && echo " · all" || echo " · top ${CATALOG_LIMIT} that fit; ./lofi.sh status -v for everything"))"
   print_catalog_table
   echo "  (pick interactively with ./configure.sh -i)"
   echo
@@ -1153,7 +1165,8 @@ else
 fi
 
 # --- RAM vs the configured LLM (only speak up if something's off) ------------
-LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+# must match config.llm_model()'s default (shell can't import Python)
+LOFI_LLM_MODEL="${LOFI_LLM_MODEL:-qwen2.5:7b}"
 
 # Best qwen2.5 tag for this much unified memory, leaving headroom for Whisper
 # (~1.6 GB), Kokoro (~0.3 GB), and the OS.
@@ -1162,11 +1175,11 @@ elif (( RAM_GB >= 12 )); then RECOMMEND="qwen2.5:7b"
 else                          RECOMMEND="qwen2.5:3b"
 fi
 
-NEED="$(llm_needs_gb "$LOCAT_LLM_MODEL")"
+NEED="$(llm_needs_gb "$LOFI_LLM_MODEL")"
 if (( NEED == 0 )); then
-  warn "configured LLM '${LOCAT_LLM_MODEL}': size unknown — can't judge fit"
+  warn "configured LLM '${LOFI_LLM_MODEL}': size unknown — can't judge fit"
 elif (( NEED + 4 > RAM_GB )); then
-  warn "configured LLM '${LOCAT_LLM_MODEL}' wants ~${NEED} GB + overhead — tight on ${RAM_GB} GB; consider ${RECOMMEND}"
+  warn "configured LLM '${LOFI_LLM_MODEL}' wants ~${NEED} GB + overhead — tight on ${RAM_GB} GB; consider ${RECOMMEND}"
 fi
 
 echo
@@ -1193,9 +1206,9 @@ if (( VERBOSE )); then
   echo
   echo "configure: hardware profile"
   print_hardware_profile
-  if [[ -d "$LOCAT_MODEL_DIR" ]]; then
-    echo "  models (LOCAT_MODEL_DIR=$LOCAT_MODEL_DIR):"
-    du -sh "$LOCAT_MODEL_DIR"/*/ 2>/dev/null \
+  if [[ -d "$LOFI_MODEL_DIR" ]]; then
+    echo "  models (LOFI_MODEL_DIR=$LOFI_MODEL_DIR):"
+    du -sh "$LOFI_MODEL_DIR"/*/ 2>/dev/null \
       | awk '{n=split($2,p,"/"); printf "     %-8s %s\n", $1, p[n-1]"/"}' || :
   fi
 

@@ -7,6 +7,27 @@ import {
 
 const SCROLL_PIN_THRESHOLD_PX = 40;
 
+// Dollar amounts and numbers, digit form ($1,234.56, 40.00, 2026); never a
+// trailing comma or period.
+const MONEY_RE = /-?\$?\d(?:[\d,]*\d)?(?:\.\d+)?/g;
+
+// Render text with amounts/numbers wrapped in <span class="money"> — text
+// nodes only, never innerHTML.
+function renderHighlighted(el: HTMLElement, text: string): void {
+  el.replaceChildren();
+  let last = 0;
+  for (const match of text.matchAll(MONEY_RE)) {
+    const index = match.index ?? 0;
+    if (index > last) el.append(text.slice(last, index));
+    const span = document.createElement("span");
+    span.className = "money";
+    span.textContent = match[0];
+    el.append(span);
+    last = index + match[0].length;
+  }
+  if (last < text.length) el.append(text.slice(last));
+}
+
 export interface Transcript {
   addUserText(text: string): void;
 }
@@ -43,7 +64,7 @@ export function attachTranscript(client: PipecatClient, pane: HTMLElement): Tran
   client.on(RTVIEvent.UserTranscript, (data: TranscriptData) => {
     keepScrolled(() => {
       pendingUserText ??= addTurn("user");
-      pendingUserText.textContent = data.text;
+      renderHighlighted(pendingUserText, data.text);
       pendingUserText.classList.toggle("partial", !data.final);
       if (data.final) pendingUserText = null;
     });
@@ -56,6 +77,15 @@ export function attachTranscript(client: PipecatClient, pane: HTMLElement): Tran
   });
 
   client.on(RTVIEvent.BotOutput, (data: BotOutputData) => {
+    // Keep only the message that opens a segment: the pre-synthesis LLM text, in
+    // its own digit form. Drops the post-synthesis duplicate ("completed") and
+    // the word-level progress messages ("in-progress"), which both carry
+    // SpokenTextFilter's words-form numbers.
+    if (data.spoken_status !== undefined) {
+      if (data.spoken_status !== "new") return;
+    } else if (data.spoken === true) {
+      return;
+    }
     keepScrolled(() => {
       botText ??= addTurn("bot");
       const key =
@@ -63,14 +93,14 @@ export function attachTranscript(client: PipecatClient, pane: HTMLElement): Tran
           ? `segment-${data.segment_id}`
           : `unkeyed-${unkeyedSegmentCount++}`;
       botSegments.set(key, data.text);
-      botText.textContent = [...botSegments.values()].join(" ");
+      renderHighlighted(botText, [...botSegments.values()].join(" "));
     });
   });
 
   return {
     addUserText(text: string): void {
       keepScrolled(() => {
-        addTurn("user").textContent = text;
+        renderHighlighted(addTurn("user"), text);
       });
     },
   };

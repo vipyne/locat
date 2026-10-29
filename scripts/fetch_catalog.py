@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 LIBRARY = "https://ollama.com/library"
 REGISTRY = "https://registry.ollama.ai/v2/library"
-UA = {"User-Agent": "locat-configure"}
+UA = {"User-Agent": "lofi-configure"}
 MANIFEST = {**UA, "Accept": "application/vnd.docker.distribution.manifest.v2+json"}
 
 # Nothing above this can run on a consumer machine; skips ~25 pointless fetches.
@@ -28,7 +28,7 @@ MAX_PARAMS_B = 150
 WORKERS = 16
 # Wall-clock budget. Past it we stop fetching and emit what we have rather than
 # letting configure hang on a network that accepts connections but never answers.
-DEADLINE_SECS = float(os.environ.get("LOCAT_CATALOG_DEADLINE", "45"))
+DEADLINE_SECS = float(os.environ.get("LOFI_CATALOG_DEADLINE", "45"))
 START = time.monotonic()
 
 
@@ -84,12 +84,28 @@ def age_days(text):
     return int(m.group(1)) * AGE_UNITS.get(m.group(2), 365)
 
 
-def keep(name, labels, params):
+# Specialized families unfit for chat duty, matched by name (qwen3-coder,
+# mathstral, sqlcoder, llama-guard3, shieldgemma, bge-reranker…). Mirrors
+# configure.sh load_catalog's name filter.
+SPECIALIZED = re.compile(r"code|math|sql|rerank|embed|guard|shield")
+
+# Last ollama.com update older than this marks a legacy family (qwen:*,
+# llama2) — superseded generations outrank current ones on cumulative pulls.
+MAX_AGE_DAYS = 365
+UNKNOWN_AGE = 10_000
+
+
+def keep(name, labels, params, age=0):
     # `vision` is deliberately NOT excluded: it marks multimodal, not
     # image-only, and most current chat models carry it (gemma3 does, and has
     # no `tools` label either — no label combination separates llava from a
     # general chat model, so excluding on it silently drops good ones).
     if "embedding" in labels:
+        return False
+    if SPECIALIZED.search(name):
+        return False
+    # Unknown age (the sentinel) stays: a failed date parse is no verdict.
+    if MAX_AGE_DAYS < age < UNKNOWN_AGE:
         return False
     # Cloud-only models list no parameter sizes — they cannot be pulled locally,
     # and running one would defeat the point of this project.
@@ -126,7 +142,7 @@ def moe_active(name):
 
 
 def main():
-    entries = [e for e in parse_library(get(LIBRARY)) if keep(e[0], e[2], e[3])]
+    entries = [e for e in parse_library(get(LIBRARY)) if keep(e[0], e[2], e[3], e[5])]
     # Popularity alone buries anything new: pull counts are cumulative, so a
     # model released this month ranks below year-old ones no matter how good.
     # Interleaving the two orderings keeps the familiar names AND the new

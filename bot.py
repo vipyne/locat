@@ -7,7 +7,7 @@ shared with the browser bots; this module owns only what is transport-specific.
 
 Everything runs locally: LocalAudioTransport (mic + speakers), Silero VAD + Local
 Smart Turn v3 for turn-taking, and the STT/LLM/TTS engines built by services.py
-(defaults: Whisper-MLX, Ollama, Kokoro — swappable via LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE in
+(defaults: Whisper-MLX, Ollama, Kokoro — swappable via LOFI_STT_ENGINE / LOFI_TTS_ENGINE in
 .env or ./configure.sh -i). No cloud services, no API keys.
 
 Importing this module has no side effects (no audio device access, no model loads) —
@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 # Import config FIRST — before any pipecat/HF import. config sets HF_HOME (and the
 # Kokoro cache paths) at import time, and Hugging Face freezes its cache root when
 # huggingface_hub is imported, so this ordering is what makes the bot read the
-# prefetched $LOCAT_MODEL_DIR/huggingface weights offline.
+# prefetched $LOFI_MODEL_DIR/huggingface weights offline.
 import config
 
 from dotenv import load_dotenv
@@ -37,7 +37,7 @@ from pipecat.workers.runner import WorkerRunner
 if TYPE_CHECKING:  # import for typing only — see build_transport() for why
     from pipecat.transports.local.audio import LocalAudioTransport
 
-import rag
+import store
 
 # Pipeline assembly (VAD/STT/LLM/TTS/context) lives in pipeline.py, shared by all bots.
 from pipeline import build_pipeline
@@ -48,14 +48,14 @@ from services import stt_weights_location
 def build_transport() -> "LocalAudioTransport":
     """Build the local audio transport (mic in + speaker out).
 
-    - Device indices come from config (LOCAT_INPUT_DEVICE_INDEX / LOCAT_OUTPUT_DEVICE_INDEX;
+    - Device indices come from config (LOFI_INPUT_DEVICE_INDEX / LOFI_OUTPUT_DEVICE_INDEX;
       default: the system default input/output devices).
 
     PyAudio is imported here rather than at module scope on purpose. It is an
     opt-in extra (`local-audio`) because it has no macOS/Linux wheels and must
-    compile against PortAudio — and bot_web.py / bot_moq.py import this module
-    for its builders while getting audio from the browser instead. A top-level
-    import would break those front-ends on machines without PortAudio, and would
+    compile against PortAudio — and bot_browser.py imports this module for its
+    builders while getting audio from the browser instead. A top-level
+    import would break that front-end on machines without PortAudio, and would
     also give this module the import-time side effect its docstring disclaims.
     """
     try:
@@ -73,7 +73,7 @@ def build_transport() -> "LocalAudioTransport":
             "  then:   uv sync --extra local-audio\n"
             "\n"
             "Or skip it and use a browser front-end, which needs no PortAudio and\n"
-            "gives you echo cancellation for free:  ./locat.sh start"
+            "gives you echo cancellation for free:  ./lofi.sh start"
         )
 
     params = LocalAudioTransportParams(
@@ -95,22 +95,40 @@ async def _speak_greeting(worker: PipelineWorker) -> None:
     stream to come up, then queue a `TTSSpeakFrame`.
     """
     await asyncio.sleep(config.greeting_delay_secs())
-    await worker.queue_frames([TTSSpeakFrame(config.greeting())])
+    await worker.queue_frames([TTSSpeakFrame(config.offline_greeting())])
 
 
 def _configure_logging() -> None:
-    """Route Pipecat's loguru output to stderr at LOCAT_LOG_LEVEL (default DEBUG).
+    """Route Pipecat's loguru output to stderr at LOFI_LOG_LEVEL (default DEBUG).
     """
     logger.remove()
     logger.add(sys.stderr, level=config.log_level())
 
 
-def _preflight_llm(model: str, base_url: str) -> None:
-    """Fail fast with a clear message if the local LLM isn't usable.
+def _ollama_models_to_check() -> list[str]:
+    """Models that must be pulled in the local Ollama: the architecture's
+    conversation model(s)."""
+    arch = config.architecture()
+    if arch == "cascade":
+        return [config.rag_llm_model()]
+    if arch == "cascade-simple-chat":
+        return [config.llm_model()]
+    models: list[str] = [config.llm_model()]
+    model = config.rag_llm_model()
+    if model not in models:
+        models.append(model)
+    return models
+
+
+def _preflight_llm(base_url: str) -> None:
+    """Fail fast with a clear message if the LLM isn't usable.
 
     A missing Ollama server or un-pulled model otherwise fails silently mid-turn
     (the LLM call errors and nothing is spoken), which is confusing.
     """
+    to_check = _ollama_models_to_check()
+    if not to_check:
+        return
     url = base_url.rstrip("/") + "/models"
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost)
@@ -123,15 +141,17 @@ def _preflight_llm(model: str, base_url: str) -> None:
         )
 
     available = {str(m.get("id", "")) for m in models}
-    # Ollama reports tags like 'llama3:latest'; match the bare name too.
-    if not any(model == m or model.split(":")[0] == m.split(":")[0] for m in available):
-        listed = ", ".join(sorted(available)) or "(none)"
-        sys.exit(
-            f"\n✖ LLM model '{model}' is not available in Ollama at {base_url}\n"
-            f"  Pull it:            ollama pull {model}\n"
-            f"  Or set LOCAT_LLM_MODEL in .env to one you have: {listed}\n"
-        )
-    logger.info(f"LLM preflight OK: '{model}' available at {base_url}")
+    for wanted in to_check:
+        # Ollama reports tags like 'llama3:latest'; match the bare name too.
+        if not any(wanted == m or wanted.split(":")[0] == m.split(":")[0] for m in available):
+            listed = ", ".join(sorted(available)) or "(none)"
+            sys.exit(
+                f"\n✖ LLM model '{wanted}' is not available in Ollama at {base_url}\n"
+                f"  Pull it:            ollama pull {wanted}\n"
+                f"  Or point LOFI_LLM_MODEL / LOFI_RAG_LLM_MODEL\n"
+                f"  at one you have: {listed}\n"
+            )
+    logger.info(f"LLM preflight OK: {', '.join(to_check)} available at {base_url}")
 
 
 def _preflight_stt() -> None:
@@ -157,12 +177,10 @@ def _preflight_stt() -> None:
 
 
 def _preflight_rag() -> None:
-    """When a RAG index exists the pipeline will embed every user turn, so the
-    embed model must be pulled — check it upfront like the LLM. No index → RAG
-    is off → nothing to check.
+    """With an index the records agent embeds every semantic search, so the
+    embed model must be pulled — check it upfront like the LLM.
     """
-    if rag.has_index(Path(config.rag_index_dir())):
-        rag.preflight_embed_model(config.embed_model(), config.ollama_api_url())
+    store.preflight(Path(config.rag_db_path()), config.embed_model(), config.ollama_api_url())
 
 
 async def main() -> None:
@@ -170,12 +188,13 @@ async def main() -> None:
         secrets), assembles the pipeline, and hands the worker to a `WorkerRunner`,
         which manages the asyncio lifecycle and SIGINT/SIGTERM shutdown.
     """
-    load_dotenv(override=True)
+    # Shell env wins over .env (matches config.py and lofi.sh).
+    load_dotenv()
     _configure_logging()
 
     # Fail fast (with guidance) if the local LLM server/model isn't ready, rather
     # than silently producing no spoken reply when the first turn hits the LLM.
-    _preflight_llm(config.llm_model(), config.ollama_base_url())
+    _preflight_llm(config.ollama_base_url())
     _preflight_stt()
     _preflight_rag()
 

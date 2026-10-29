@@ -1,5 +1,5 @@
 [project]
-name = "locat"
+name = "lofi"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -9,14 +9,26 @@ dependencies = [
     # with pipecat's own pins.
     "fastapi>=0.115.6,<1",
     "loguru>=0.7.3",
-    "moq-rs>=0.3.2,<0.4.0",
+    # pipecat main's runner has an upload route; fastapi needs this for it.
+    "python-multipart>=0.0.18",
     "num2words>=0.5.14",
-    "pipecat-ai[kokoro,moq,silero,whisper]>=1.7.0",
+    # Pipecat ≥1.13: first release with LLMWithBackend / BackendLLMWorker
+    # (the split architecture). Intel macs stay on the frozen `intel-mac`
+    # branch (1.7) — core dep `loudness` ships no Intel-mac wheels.
+    # Online-session cascade (deepgram STT / openai LLM + embeddings /
+    # cartesia TTS) rides in the base install — a session picks its mode on
+    # the page, so both stacks ship.
+    # webrtc (aiortc) is the default browser transport, so it ships too:
+    # aiortc 1.15.0 is a pure-Python wheel (py3-none-any) and its binary deps
+    # all cover mac-arm64 / manylinux-x86_64 / win-amd64 (av cp312-abi3,
+    # pylibsrtp cp310-abi3, aioice pure-python) — verified on PyPI 2026-10-21.
+    "pipecat-ai[cartesia,deepgram,kokoro,openai,silero,webrtc,whisper]>=1.13.0,<1.14",
     # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
     # platforms default to faster-whisper (CPU) instead (see services.py).
-    "pipecat-ai[mlx-whisper]>=1.7.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "pipecat-ai[mlx-whisper]; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "pypdf>=6.16.2",
     "python-dotenv>=1.2.2",
+    "sqlite-vec>=0.1.9",
     "textual>=8.2.8",
     "uvicorn>=0.32.0,<1",
 ]
@@ -31,7 +43,7 @@ piper = ["pipecat-ai[piper]"]
 # bot.py (LocalAudioTransport) only. PyAudio ships wheels for Windows *only*, so
 # on macOS/Linux it compiles against PortAudio — the one dependency here that
 # needs a C toolchain. Keeping it out of the base install means a bare
-# `uv sync` works on any machine, and the browser front-end (bot_moq.py)
+# `uv sync` works on any machine, and the browser front-end (bot_browser.py)
 # runs without it; it gets echo cancellation from the browser anyway.
 # See README "Requirements".
 #   brew install portaudio && uv sync --extra local-audio

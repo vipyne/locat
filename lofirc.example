@@ -1,0 +1,57 @@
+# LOFI_* are for this repo. HF_* and OLLAMA_* are read by huggingface_hub and ollama.
+# Values shown are the defaults. See README.md
+# Prompts and model defaults live in tunables.py — edit that file directly.
+
+LOFI_MODEL_DIR=./models
+
+#LOFI_ARCHITECTURE=llmwithbackend            # llmwithbackend (default: front + analyst backend) | cascade (STT,LLM,TTS)
+                                             # flags win: ./lofi.sh start --cascade | --llmwithbackend
+
+#LOFI_ONLINE_ONLY=0                          # 1 = serve online sessions only (./lofi.sh start --online-only)
+#LOFI_OFFLINE_ONLY=0                         # 1 = serve offline sessions only (./lofi.sh start --offline-only); wins when both are set
+
+#LOFI_LLM_MODEL=qwen2.5:7b
+#LOFI_RAG_LLM_MODEL=qwen3:8b                 # records analyst backend; needs real API tool calls
+
+#LOFI_OLLAMA_BASE_URL=http://localhost:11434/v1
+#LOFI_EMBED_MODEL=nomic-embed-text
+
+#LOFI_RAG_DATA_DIR=./data
+#LOFI_RAG_INDEX_DIR=./models/rag-index
+#LOFI_RAG_DB=./models/rag-index/lofi.db
+#LOFI_RAG_CHUNK_TOKENS=500
+#LOFI_RAG_CHUNK_OVERLAP=50
+
+#LOFI_STT_ENGINE=whisper_mlx                 # whisper_mlx | faster_whisper | moonshine
+#LOFI_WHISPER_MODEL=LARGE_V3_TURBO
+#LOFI_FASTER_WHISPER_MODEL=DISTIL_MEDIUM_EN
+#LOFI_MOONSHINE_MODEL=SMALL_STREAMING
+
+#LOFI_TTS_ENGINE=kokoro                      # kokoro | piper
+#LOFI_KOKORO_VOICE=af_heart
+#LOFI_PIPER_VOICE=en_US-lessac-medium
+
+# for Headphones version
+#LOFI_INPUT_DEVICE_INDEX=
+#LOFI_OUTPUT_DEVICE_INDEX=
+
+#LOFI_GREETING_DELAY_SECS=1.0
+
+#LOFI_LOG_LEVEL=DEBUG
+#LOFI_WEB_PORT=7860
+#LOFI_OPEN_BROWSER=1                         # 0 = don't auto-open the page (always skipped on WSL)
+#LOFI_STATE_DIR=.lofi
+
+#LOFI_VAD_CONFIDENCE=0.7
+#LOFI_VAD_MIN_VOLUME=0.0
+#LOFI_VAD_START_SECS=0.2
+#LOFI_VAD_STOP_SECS=0.2
+
+#LOFI_KOKORO_MODEL_PATH=./models/kokoro/kokoro-v1.0.onnx
+#LOFI_KOKORO_VOICES_PATH=./models/kokoro/voices-v1.0.bin
+#LOFI_PIPER_DOWNLOAD_DIR=./models/piper
+
+#HF_HOME=./models/huggingface
+#HF_HUB_DISABLE_PROGRESS_BARS=1
+#OLLAMA_MODELS=/absolute/path/to/ollama-store
+#OLLAMA_HOST=127.0.0.1:11434

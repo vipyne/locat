@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Print the exact STT/LLM/TTS engines + models the bot will load.
 
-Shared by locat.sh and configure.sh so the printed values can never drift from
+Shared by lofi.sh and configure.sh so the printed values can never drift from
 what the bot actually loads: everything resolves through config.py (which
-loads ./.env), including the engine choice (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE) that
+loads ./.env), including the engine choice (LOFI_STT_ENGINE / LOFI_TTS_ENGINE) that
 services.py dispatches on.
 
 Each model line is followed by the full path of its weights on disk, found by
 looking where the engine would actually load from — the configured stores AND
 the tools' default caches — so the path shows where a model really is, not
-where the config wishes it were. Files outside LOCAT_MODEL_DIR are flagged.
+where the config wishes it were. Files outside LOFI_MODEL_DIR are flagged.
 """
 
 import json
@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
 
-OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
+OUTSIDE_FLAG = "⚠️  outside LOFI_MODEL_DIR"
 NOT_DOWNLOADED = "(not downloaded yet)"
 
 _WEIGHT_SUFFIXES = {".safetensors", ".bin", ".npz", ".onnx", ".pt"}
@@ -203,6 +203,11 @@ def _path_line(found: Path | None) -> str:
     return f"  → {found}   {OUTSIDE_FLAG}"
 
 
+def _missing(found: Path | None) -> bool:
+    """No weights on disk for this role — the panel paints the line red."""
+    return found is None or not found.exists()
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -271,7 +276,7 @@ def _voice_files(directory: Path):
 
 
 def downloaded_entries() -> list[dict]:
-    """Every model actually on disk, across the locat store AND the tools' home caches."""
+    """Every model actually on disk, across the lofi store AND the tools' home caches."""
     entries: list[dict] = []
 
     seen_dirs: set[Path] = set()
@@ -322,7 +327,7 @@ def _print_downloaded() -> None:
         return
     any_outside = any(_outside_store(Path(e["path"])) for e in entries)
     if any_outside:
-        print(f"⚠️  = outside LOCAT_MODEL_DIR ({config.model_dir()})")
+        print(f"⚠️  = outside LOFI_MODEL_DIR ({config.model_dir()})")
         print("")
     total = sum(e["bytes"] for e in entries)
     name_width = max(len(e["name"]) for e in entries)
@@ -344,7 +349,7 @@ def _stt_line() -> str:
 
             return f"Whisper-MLX {name} ({MLXModel[name].value})"
         except (ImportError, KeyError):
-            # pipecat missing (deps not synced) or LOCAT_WHISPER_MODEL not a valid
+            # pipecat missing (deps not synced) or LOFI_WHISPER_MODEL not a valid
             # enum member — still print the configured name rather than dying.
             return f"Whisper-MLX {name}"
     if engine == "faster_whisper":
@@ -363,23 +368,68 @@ def _tts_line() -> str:
     return f"unknown engine '{engine}'"
 
 
-def model_entries() -> list[dict]:
-    """Importable form of the model lines (bot_moq sends them as `locat-config`)."""
-    ollama = f"(Ollama @ {config.ollama_base_url()})"
+def _entry(role: str, model: str, found: Path | None) -> dict:
+    return {
+        "role": role,
+        "model": model,
+        "path": _path_line(found),
+        "missing": _missing(found),
+    }
+
+
+def _llm_entry() -> dict:
+    # cascade holds the four retrieval tools on the RAG model directly.
+    model = config.rag_llm_model() if config.architecture() == "cascade" else config.llm_model()
+    return _entry(
+        "LLM",
+        f"{model} (Ollama @ {config.ollama_base_url()})",
+        _ollama_file(model),
+    )
+
+
+def online_model_entries() -> list[dict]:
+    """Online session's four rows — cloud model names only, no local paths."""
     return [
-        {"role": "STT", "model": _stt_line(), "path": _path_line(_stt_file())},
-        {
-            "role": "LLM",
-            "model": f"{config.llm_model()} {ollama}",
-            "path": _path_line(_ollama_file(config.llm_model())),
-        },
-        {"role": "TTS", "model": _tts_line(), "path": _path_line(_tts_file())},
-        {
-            "role": "EMBED",
-            "model": f"{config.embed_model()} {ollama}",
-            "path": _path_line(_ollama_file(config.embed_model())),
-        },
+        {"role": role, "model": model, "path": "—", "missing": False}
+        for role, model in (
+            ("STT", f"{config.online_stt_model()} (Deepgram cloud)"),
+            ("LLM", f"{config.online_llm_model()} (OpenAI cloud)"),
+            ("TTS", f"{config.online_tts_voice()} (Cartesia cloud)"),
+            ("EMBED", f"{config.online_embed_model()} (OpenAI cloud)"),
+        )
     ]
+
+
+def model_entries(mode: str = "offline") -> list[dict]:
+    """Importable form of the model lines (bot_browser sends them as `lofi-config`)."""
+    if mode == "online":
+        return online_model_entries()
+    ollama = f"(Ollama @ {config.ollama_base_url()})"
+    arch = config.architecture()
+    entries = [
+        _entry("STT", _stt_line(), _stt_file()),
+        _llm_entry(),
+    ]
+    # Split runs the records analyst as its own (always local) model.
+    if arch == "llmwithbackend":
+        entries.append(
+            _entry(
+                "ANALYST",
+                f"{config.rag_llm_model()} {ollama}",
+                _ollama_file(config.rag_llm_model()),
+            )
+        )
+    entries.append(_entry("TTS", _tts_line(), _tts_file()))
+    # simple-chat never builds a records index, so it has no embed model.
+    if arch != "cascade-simple-chat":
+        entries.append(
+            _entry(
+                "EMBED",
+                f"{config.embed_model()} {ollama}",
+                _ollama_file(config.embed_model()),
+            )
+        )
+    return entries
 
 
 def main() -> None:
@@ -392,8 +442,8 @@ def main() -> None:
     bare = "--bare" in sys.argv[1:]
     lines = []
     for entry in model_entries():
-        lines.append(f"{entry['role']:<7}{entry['model']}")
-        lines.append(f"       {entry['path']}")
+        lines.append(f"{entry['role']:<8}{entry['model']}")
+        lines.append(f"        {entry['path']}")
     if bare:
         for line in lines:
             print(f"         {line}")

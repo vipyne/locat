@@ -26,6 +26,13 @@ h1 {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex: 1;
+}
+
+#transport-name {
+  margin-left: auto;
+  font-size: 0.9rem;
+  opacity: 0.75;
 }
 
 button {
@@ -39,12 +46,38 @@ button {
   opacity: 0.75;
 }
 
-#webtransport-banner {
+#online-banner {
   margin-top: 1rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  padding: 0.75rem 1rem;
+  border: 2px solid #b45309;
   border-radius: 4px;
-  background: color-mix(in srgb, currentColor 8%, transparent);
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  font-weight: 700;
+}
+
+#mode-select {
+  font: inherit;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.money {
+  font-weight: 700;
+  color: #15803d;
+}
+
+#rag-stopwatch {
+  font-weight: 400;
+  font-size: 0.8em;
+  opacity: 0.8;
+  margin-left: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#online-banner .online-detail {
+  display: block;
+  margin-top: 0.25rem;
+  font-weight: 400;
 }
 
 #app {
@@ -52,13 +85,13 @@ button {
   grid-template-areas:
     "transcript panels"
     "composer panels";
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  grid-template-columns: minmax(0, 1fr) minmax(21.6rem, 28.8rem);
   grid-template-rows: 1fr auto;
   gap: 0.75rem 1.5rem;
   margin-top: 1rem;
 }
 
-@media (max-width: 54rem) {
+@media (max-width: 57.6rem) {
   #app {
     grid-template-areas:
       "transcript"
@@ -136,6 +169,36 @@ button {
   border-radius: 4px;
 }
 
+/* Vaporwave palette for the what's-running model lines — darker variants so
+   they hold contrast on a light background. */
+:root {
+  --cfg-stt: #d6369f;
+  --cfg-llm: #8a2be2;
+  --cfg-analyst: #2a9d81;
+  --cfg-tts: #0087a8;
+  --cfg-embed: #9c8f00;
+  --cfg-missing: #c81e3c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cfg-stt: #ff71ce;
+    --cfg-llm: #b967ff;
+    --cfg-analyst: #93e9be;
+    --cfg-tts: #01cdfe;
+    --cfg-embed: #fffb96;
+    --cfg-missing: #ff5d6c;
+  }
+}
+
+.cfg-stt { color: var(--cfg-stt); }
+.cfg-llm { color: var(--cfg-llm); }
+.cfg-analyst { color: var(--cfg-analyst); }
+.cfg-tts { color: var(--cfg-tts); }
+.cfg-embed { color: var(--cfg-embed); }
+/* A role with no weights on disk — the panel says so where its path would be. */
+.cfg-missing { color: var(--cfg-missing); font-weight: 600; }
+
 #rag-panel {
   margin-top: 1rem;
 }
@@ -161,6 +224,37 @@ button {
   opacity: 0.75;
 }
 
+.rag-route {
+  margin: 0 0 0.2rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
+/* Lookup in flight: pulse so the panel reads as working, not stalled. */
+.rag-pending .rag-route {
+  opacity: 1;
+  animation: rag-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rag-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rag-pending .rag-route { animation: none; }
+}
+
+.rag-timing {
+  opacity: 0.5;
+}
+
+.rag-answer {
+  margin: 0.35rem 0 0.5rem;
+}
+
 .rag-turn summary {
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -172,4 +266,28 @@ button {
   margin: 0.35rem 0 0.5rem;
   opacity: 0.85;
   white-space: pre-wrap;
+}
+
+#rag-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.money-rain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.money-drop {
+  position: absolute;
+  top: -2rem;
+  animation-name: money-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes money-fall {
+  from { transform: translateY(0) rotate(0deg); opacity: 1; }
+  to   { transform: translateY(70vh) rotate(360deg); opacity: 0.1; }
 }

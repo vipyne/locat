@@ -4,7 +4,7 @@ byte-for-byte."""
 
 from pathlib import Path
 
-TEXT = "Hello from the hand-written locat PDF fixture. It mentions an axolotl."
+TEXT = "Hello from the hand-written lofi PDF fixture. It mentions an axolotl."
 
 
 def build_pdf(text: str) -> bytes:

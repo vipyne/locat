@@ -1,18 +1,18 @@
-"""Adopt models from default HF/Ollama locations into LOCAT_MODEL_DIR via symlinks.
+"""Adopt models from default HF/Ollama locations into LOFI_MODEL_DIR via symlinks.
 
-`./locat.sh consolidate` makes every model visible AND loadable from one place:
+`./lofi.sh consolidate` makes every model visible AND loadable from one place:
 
 - HuggingFace: per-model. A model in the external cache (~/.cache/huggingface)
-  that locat's store lacks gets a symlink inside models/huggingface/hub/, so
-  loaders resolve it through LOCAT_MODEL_DIR. A broken partial in locat's store
+  that lofi's store lacks gets a symlink inside models/huggingface/hub/, so
+  loaders resolve it through LOFI_MODEL_DIR. A broken partial in lofi's store
   (leftover *.incomplete download stubs) is replaced by a link to a complete
-  external copy. A complete copy locat owns is never touched.
+  external copy. A complete copy lofi owns is never touched.
 - Ollama: whole-store. Models share content-addressed blobs, so adoption links
-  models/ollama -> ~/.ollama/models when locat's store is empty and the
+  models/ollama -> ~/.ollama/models when lofi's store is empty and the
   external one is not. Both populated = a conflict reported for a human.
 
-External stores are never modified. The only writes are symlinks in the locat
-store and removal of locat-owned 0-byte *.incomplete stubs. Idempotent.
+External stores are never modified. The only writes are symlinks in the lofi
+store and removal of lofi-owned 0-byte *.incomplete stubs. Idempotent.
 """
 
 import argparse
@@ -58,18 +58,18 @@ def _ollama_has_models(store: Path) -> bool:
     return manifests.is_dir() and any(p.is_file() for p in manifests.rglob("*"))
 
 
-def _hf_actions(locat_hub: Path, external_hub: Path, dry_run: bool) -> list[Action]:
+def _hf_actions(lofi_hub: Path, external_hub: Path, dry_run: bool) -> list[Action]:
     actions: list[Action] = []
     if not external_hub.is_dir():
         return actions
     for external in sorted(external_hub.glob("models--*")):
-        ours = locat_hub / external.name
+        ours = lofi_hub / external.name
         if ours.is_symlink():
             actions.append(Action("hf-borrowed", ours, ours.resolve()))
         elif not ours.exists():
             actions.append(Action("hf-borrow", ours, external))
             if not dry_run:
-                locat_hub.mkdir(parents=True, exist_ok=True)
+                lofi_hub.mkdir(parents=True, exist_ok=True)
                 ours.symlink_to(external)
         elif _hf_model_is_broken(ours) and _hf_model_is_usable(external):
             actions.append(Action("hf-replace-partial", ours, external))
@@ -82,21 +82,21 @@ def _hf_actions(locat_hub: Path, external_hub: Path, dry_run: bool) -> list[Acti
 
 
 def _ollama_actions(
-    locat_store: Path, external: Path | None, in_use: bool, dry_run: bool
+    lofi_store: Path, external: Path | None, in_use: bool, dry_run: bool
 ) -> list[Action]:
     if external is None or not _ollama_has_models(external):
-        return [Action("ollama-none", locat_store)]
-    if locat_store.is_symlink():
-        return [Action("ollama-borrowed", locat_store, locat_store.resolve())]
+        return [Action("ollama-none", lofi_store)]
+    if lofi_store.is_symlink():
+        return [Action("ollama-borrowed", lofi_store, lofi_store.resolve())]
     if in_use:
-        return [Action("ollama-in-use", locat_store, external)]
-    if _ollama_has_models(locat_store):
-        return [Action("ollama-conflict", locat_store, external)]
+        return [Action("ollama-in-use", lofi_store, external)]
+    if _ollama_has_models(lofi_store):
+        return [Action("ollama-conflict", lofi_store, external)]
     if not dry_run:
-        if locat_store.is_dir():
-            shutil.rmtree(locat_store)
-        locat_store.symlink_to(external)
-    return [Action("ollama-borrow", locat_store, external)]
+        if lofi_store.is_dir():
+            shutil.rmtree(lofi_store)
+        lofi_store.symlink_to(external)
+    return [Action("ollama-borrow", lofi_store, external)]
 
 
 def consolidate(
@@ -107,8 +107,8 @@ def consolidate(
     ollama_store_in_use: bool,
     dry_run: bool,
 ) -> list[Action]:
-    locat_hub = model_dir / "huggingface" / "hub"
-    actions = _hf_actions(locat_hub, external_hf_hub, dry_run)
+    lofi_hub = model_dir / "huggingface" / "hub"
+    actions = _hf_actions(lofi_hub, external_hf_hub, dry_run)
     actions += _ollama_actions(
         model_dir / "ollama", external_ollama, ollama_store_in_use, dry_run
     )
@@ -164,14 +164,14 @@ def main() -> None:
         print(f"{prefix}{action.describe()}")
     if any(a.kind == "ollama-in-use" for a in actions):
         print(
-            "\nollama server is running — stop it (./locat.sh stop or your own instance)\n"
-            "and re-run ./locat.sh consolidate to adopt its store.",
+            "\nollama server is running — stop it (./lofi.sh stop or your own instance)\n"
+            "and re-run ./lofi.sh consolidate to adopt its store.",
             file=sys.stderr,
         )
     if any(a.kind == "ollama-conflict" for a in actions):
         print(
-            "\nboth ollama stores contain models — locat will not merge them.\n"
-            "keep using the locat store, or empty it and re-run to borrow the external one.",
+            "\nboth ollama stores contain models — lofi will not merge them.\n"
+            "keep using the lofi store, or empty it and re-run to borrow the external one.",
             file=sys.stderr,
         )
     print(f"\nbrowse everything: ls -al {model_dir}")
