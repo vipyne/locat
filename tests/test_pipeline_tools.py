@@ -40,7 +40,9 @@ def stub_services(monkeypatch):
     # Generic pipeline-shape tests run on cascade: split needs real LLM
     # services (LLMWithBackend wraps them) and has its own dedicated tests.
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
-    for name in ("build_stt", "build_llm", "build_tts", "build_vad_processor"):
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda *a, **kw: FrameProcessor())
+    for name in ("build_llm", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda *a, **kw: FrameProcessor())
 
 
@@ -147,7 +149,7 @@ def test_filler_handler_pushes_busy_message_and_filler(db, monkeypatch, stub_ser
 
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     monkeypatch.setattr(pipeline, "build_cascade_llm", lambda *a, **kw: RecordingLLM())
-    monkeypatch.setattr(pipeline, "build_tts", RecordingTTS)
+    monkeypatch.setattr(services, "build_tts", RecordingTTS)
     built = pipeline.build_pipeline(fake_transport())
     handler = built.llm._event_handlers["on_function_calls_started"].handlers[0]
     asyncio.run(handler(built.llm, []))
@@ -194,8 +196,9 @@ def test_split_architecture_builds_llm_with_backend(db, monkeypatch):
 
     import tunables
 
-    for name in ("build_stt", "build_tts", "build_vad_processor"):
-        monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda: FrameProcessor())
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
@@ -219,8 +222,9 @@ def test_split_frontend_gets_domain_named_delegate(db, monkeypatch):
     # a domain term it calls reliably — the connector installs it accordingly.
     from pipecat.pipeline.llm_with_backend import LLMWithBackend
 
-    for name in ("build_stt", "build_tts", "build_vad_processor"):
-        monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda: FrameProcessor())
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
@@ -257,8 +261,9 @@ def test_backend_transform_strips_think_and_is_awaitable(db):
 
 
 def test_split_pipeline_includes_backend_tool_panel(db, monkeypatch):
-    for name in ("build_stt", "build_tts", "build_vad_processor"):
-        monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda: FrameProcessor())
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
@@ -370,7 +375,7 @@ def test_cascade_filler_is_spoken_but_kept_out_of_context(db, monkeypatch, stub_
 
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     monkeypatch.setattr(pipeline, "build_cascade_llm", lambda *a, **kw: EventfulLLM())
-    monkeypatch.setattr(pipeline, "build_tts", RecordingTTSService)
+    monkeypatch.setattr(services, "build_tts", RecordingTTSService)
     built = pipeline.build_pipeline(fake_transport())
     handler = built.llm._event_handlers["on_function_calls_started"].handlers[0]
     asyncio.run(handler(built.llm, []))
@@ -387,9 +392,9 @@ def test_split_speaks_canned_filler_out_of_context(db, monkeypatch):
 
     from pipecat.frames.frames import TTSSpeakFrame
 
-    for name in ("build_stt", "build_vad_processor"):
-        monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
-    monkeypatch.setattr(pipeline, "build_tts", RecordingTTSService)
+    monkeypatch.setattr(services, "build_stt", lambda: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda: FrameProcessor())
+    monkeypatch.setattr(services, "build_tts", RecordingTTSService)
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
@@ -688,8 +693,9 @@ def test_backend_tool_panel_announces_pending_call(db):
 
 
 def test_split_pipeline_warms_the_analyst(db, monkeypatch):
-    for name in ("build_stt", "build_tts", "build_vad_processor"):
-        monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda: FrameProcessor())
     monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     calls: list = []

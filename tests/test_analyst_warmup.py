@@ -111,3 +111,34 @@ def test_warm_analyst_without_event_loop_is_a_noop(monkeypatch):
 
     monkeypatch.setattr(services, "warm_analyst_model", boom)
     services.warm_analyst()
+
+
+def test_warmup_skipped_when_the_llm_is_online(tmp_path, monkeypatch):
+    """An online brain has no local analyst to load."""
+    from types import SimpleNamespace
+
+    from pipecat.processors.frame_processor import FrameProcessor
+
+    import pipeline
+    from modes import SessionModes
+
+    monkeypatch.setenv("LOCAT_ONLINE_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_PUBLIC_RAG_DB", str(tmp_path / "missing" / "locat-public.db"))
+    monkeypatch.setenv("LOCAT_PUBLIC_RAG_DATA_DIR", str(tmp_path / "public"))
+    for name in ("build_stt", "build_tts"):
+        monkeypatch.setattr(services, name, lambda *a, **kw: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_vad_processor", lambda *a, **kw: FrameProcessor())
+    monkeypatch.setattr(pipeline, "build_online_llm", lambda *a, **kw: FrameProcessor())
+    calls: list = []
+    monkeypatch.setattr(
+        services, "warm_analyst", lambda system_messages=None: calls.append(system_messages)
+    )
+
+    async def build():
+        pipeline.build_pipeline(
+            SimpleNamespace(input=FrameProcessor, output=FrameProcessor),
+            SessionModes(session="offline", stt="offline", llm="online", tts="offline"),
+        )
+
+    asyncio.run(build())
+    assert calls == []

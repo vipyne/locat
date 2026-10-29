@@ -1,8 +1,12 @@
 """Shared pipeline construction — one brain, every transport.
 
-`build_pipeline(transport)` assembles the full-duplex pipeline used by every bot:
+`build_pipeline(transport, modes)` assembles the full-duplex pipeline used by
+every bot:
 
     transport.input() -> VAD -> STT -> user-context -> LLM -> TTS -> transport.output() -> assistant-context
+
+STT, LLM and TTS each run offline or online per `modes` (modes.py): the brain
+branch keys off `modes.llm`, the ear and mouth off `services.stt_for`/`tts_for`.
 
 Retrieval is no longer a pipeline stage. When an index exists the conversation
 model is offered one tool, `ask_financial_records` (tools.py), whose handler
@@ -42,7 +46,7 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.transports.base_transport import BaseTransport
 
 import ingest
-from modes import OFFLINE_MODE, ONLINE_MODE  # noqa: F401 (re-exported)
+from modes import OFFLINE_MODE, ONLINE_MODE, SessionModes  # noqa: F401 (constants re-exported)
 import store
 import tools
 from rag_agent import grounded_question, strip_think
@@ -53,10 +57,6 @@ from services import (
     build_llm,
     build_online_backend_llm,
     build_online_llm,
-    build_online_stt,
-    build_online_tts,
-    build_stt,
-    build_tts,
 )
 from silence_watchdog import SilenceWatchdog
 from tunables import (
@@ -408,10 +408,13 @@ def build_online_backend():
     )
 
 
-def build_online_pipeline(transport: BaseTransport) -> BuiltBot:
-    """Online session: Deepgram STT -> OpenAI front (-> OpenAI documents
-    analyst on the llmwithbackend split) -> Cartesia TTS. Nothing here opens
-    the private db or reaches Ollama."""
+def _build_online_brain() -> tuple:
+    """Online brain: OpenAI front (-> OpenAI documents analyst on the
+    llmwithbackend split) over the public index. Nothing here opens the private
+    db or reaches Ollama.
+
+    Returns ``(context, llm, aggregators, splitting)``.
+    """
     public_tools = build_public_tools()
     splitting = config.online_architecture() == "llmwithbackend" and public_tools is not None
     if splitting:
@@ -427,7 +430,6 @@ def build_online_pipeline(transport: BaseTransport) -> BuiltBot:
             if public_tools
             else LLMContext(messages=[{"role": "system", "content": prompt}])
         )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
     front = build_online_llm()
     if splitting:
         from pipecat.pipeline.llm_with_backend import BackendConnector, LLMWithBackend
@@ -439,39 +441,16 @@ def build_online_pipeline(transport: BaseTransport) -> BuiltBot:
         )
     else:
         llm = front
-    tts = build_online_tts()
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            build_vad_processor(),
-            build_online_stt(),
-            user_aggregator,
-            llm,
-            *([BackendToolPanel()] if splitting else []),
-            SilenceWatchdog(),
-            tts,
-            transport.output(),
-            assistant_aggregator,
-        ]
-    )
-    return BuiltBot(
-        pipeline=pipeline,
-        context=context,
-        user_aggregator=user_aggregator,
-        assistant_aggregator=assistant_aggregator,
-        llm=llm,
-        tts=tts,
-    )
+    return context, llm, LLMContextAggregatorPair(context), splitting
 
 
-def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltBot:
-    """Assemble the bot for one session.
+def _build_offline_brain(tts) -> tuple:
+    """Offline brain: the local cascade, the split (front + records analyst), or
+    simple chat, per ``LOCAT_ARCHITECTURE``. ``tts`` speaks the filler phrase
+    while a tool call or a delegation runs.
 
-    ``mode``: ``"online"`` builds the cloud cascade over the public index;
-    every other value builds the offline stack.
+    Returns ``(context, llm, aggregators, splitting)``.
     """
-    if mode == ONLINE_MODE:
-        return build_online_pipeline(transport)
     arch = config.architecture()
     simple_chat = arch == "cascade-simple-chat"
     if simple_chat:
@@ -507,7 +486,6 @@ def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltB
         if records_tools
         else LLMContext(messages=[{"role": "system", "content": prompt}])
     )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     if arch == "cascade":
         front = build_cascade_llm()
@@ -529,7 +507,6 @@ def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltB
         )
     else:
         llm = front
-    tts = build_tts()
 
     # Filler covers a tool call or a delegation; simple-chat makes neither.
     if records_tools or splitting:
@@ -539,11 +516,63 @@ def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltB
             await service.push_frame(RTVIServerMessageFrame(data={"type": BUSY_MESSAGE_TYPE}))
             await tts.queue_frame(TTSSpeakFrame(LOCAT_FILLER_PHRASE, append_to_context=False))
 
+    return context, llm, LLMContextAggregatorPair(context), splitting
+
+
+# What leaves the machine when a local brain runs with a cloud ear or mouth.
+_CROSSES_NETWORK = {
+    "stt": "microphone audio goes to Deepgram",
+    "tts": "reply text goes to Cartesia to be spoken",
+}
+
+
+def _warn_mixed_session(session_modes: SessionModes) -> None:
+    """Name the audio that crosses the network while the brain stays local."""
+    if session_modes.llm != OFFLINE_MODE:
+        return
+    crossing = [
+        _CROSSES_NETWORK[service]
+        for service in ("stt", "tts")
+        if getattr(session_modes, service) == ONLINE_MODE
+    ]
+    if crossing:
+        logger.warning(
+            f"mixed session: the LLM runs locally, but {'; '.join(crossing)} — "
+            "your words stay on this machine, your audio does not"
+        )
+
+
+def _as_modes(value) -> SessionModes:
+    """A SessionModes, or a bare session mode string meaning all three services."""
+    if isinstance(value, SessionModes):
+        return value
+    mode = value if value in (OFFLINE_MODE, ONLINE_MODE) else OFFLINE_MODE
+    return SessionModes(session=mode, stt=mode, llm=mode, tts=mode)
+
+
+def build_pipeline(transport: BaseTransport, modes=None) -> BuiltBot:
+    """Assemble the bot for one session.
+
+    ``modes``: a ``SessionModes``, or a bare session mode string that sets all
+    three services (``"online"`` is the cloud session; anything else offline).
+    The LLM mode is the brain mode — persona, architecture, and which db opens
+    key off it — while STT and TTS follow their own modes, so a local brain can
+    run with a cloud ear or mouth.
+    """
+    session_modes = _as_modes(modes)
+    _warn_mixed_session(session_modes)
+    stt = services.stt_for(session_modes.stt)
+    tts = services.tts_for(session_modes.tts)
+    if session_modes.llm == ONLINE_MODE:
+        context, llm, aggregators, splitting = _build_online_brain()
+    else:
+        context, llm, aggregators, splitting = _build_offline_brain(tts)
+    user_aggregator, assistant_aggregator = aggregators
     pipeline = Pipeline(
         [
             transport.input(),
             build_vad_processor(),
-            build_stt(),
+            stt,
             user_aggregator,
             llm,
             *([BackendToolPanel()] if splitting else []),

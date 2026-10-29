@@ -344,7 +344,7 @@ async def run_bot(
     transport: BaseTransport, runner_args: RunnerArguments, mode: str = OFFLINE_MODE
 ) -> None:
     """Assemble and run the pipeline for one connected browser client."""
-    built = build_pipeline(transport, mode=mode)
+    built = build_pipeline(transport, modes=mode)
     worker = PipelineWorker(built.pipeline, params=PipelineParams())
 
     @worker.rtvi.event_handler("on_client_ready")
