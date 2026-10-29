@@ -1,4 +1,4 @@
-# Ralph loop prompt — LO-FI RAG layer
+# Ralph loop prompt — locat RAG layer
 
 You are one iteration of an unattended loop. The same prompt runs every iteration;
 your memory is the repo. Read, do ONE task, verify, commit, stop.
@@ -67,7 +67,7 @@ your memory is the repo. Read, do ONE task, verify, commit, stop.
 ## Finish — promise protocol
 Print exactly ONE of these as your last line, or neither:
 - Every task in `ralph/PLAN.md` is fully checked and the full test suite passes →
-  `<promise>LOFI_RAG_COMPLETE</promise>`
+  `<promise>LOCAT_RAG_COMPLETE</promise>`
 - The ONLY remaining unchecked work is `gated:`/`blocked:` steps, each with a
   matching `ralph/HUMAN.md` entry → `<promise>HUMAN_GATE</promise>`
 - Otherwise print no promise; stop after your commit and the loop calls you again.

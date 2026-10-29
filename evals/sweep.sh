@@ -17,7 +17,7 @@ DEFAULT_FRONTS="qwen2.5:7b qwen3:4b"
 read -r -a analysts <<< "${ANALYSTS:-$DEFAULT_ANALYSTS}"
 read -r -a fronts <<< "${FRONTS:-$DEFAULT_FRONTS}"
 
-api="${LOFI_OLLAMA_BASE_URL:-http://localhost:11434/v1}"
+api="${LOCAT_OLLAMA_BASE_URL:-http://localhost:11434/v1}"
 api="${api%/v1}"
 
 have() { curl -s "$api/api/tags" | grep -q "\"name\":\"$1\""; }
@@ -34,14 +34,14 @@ tag() { echo "${1//[:\/]/-}"; }
 for m in "${analysts[@]}"; do
   pull "$m" || continue
   echo "== analyst: $m (--stage analyst_followup)"
-  LOFI_RAG_LLM_MODEL="$m" uv run python evals/run_evals.py \
+  LOCAT_RAG_LLM_MODEL="$m" uv run python evals/run_evals.py \
     --stage analyst_followup --json "$RESULTS/analyst-$(tag "$m").json"
 done
 
 for m in "${fronts[@]}"; do
   pull "$m" || continue
   echo "== front: $m (--stage front)"
-  LOFI_LLM_MODEL="$m" uv run python evals/run_evals.py \
+  LOCAT_LLM_MODEL="$m" uv run python evals/run_evals.py \
     --stage front --json "$RESULTS/front-$(tag "$m").json"
 done
 

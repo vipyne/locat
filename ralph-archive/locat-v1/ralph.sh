@@ -3,7 +3,7 @@
 # is reached. Each iteration is a fresh `claude -p` session; state lives in the repo
 # (ralph/PLAN.md checkboxes + Status table, ralph/PROGRESS.md, git history).
 #
-#   <promise>LOFI_RAG_COMPLETE</promise>  → everything done                  (exit 0)
+#   <promise>LOCAT_RAG_COMPLETE</promise>  → everything done                  (exit 0)
 #   <promise>HUMAN_GATE</promise>   → loop needs you: see ralph/HUMAN.md (exit 2)
 #
 #   ./ralph/ralph.sh                 # default: 25 iterations, bypass permission prompts
@@ -18,7 +18,7 @@ set -u
 cd "$(dirname "$0")/.."   # always run from the repo root
 MAX_ITER="${MAX_ITER:-25}"
 PERMS="${PERMS:---dangerously-skip-permissions}"
-PROMISE="LOFI_RAG_COMPLETE"
+PROMISE="LOCAT_RAG_COMPLETE"
 mkdir -p ralph/logs
 command -v claude >/dev/null || { echo "claude CLI not found" >&2; exit 1; }
 [[ -f ralph/PROMPT.md ]] || { echo "ralph/PROMPT.md missing" >&2; exit 1; }

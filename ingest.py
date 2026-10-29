@@ -480,7 +480,7 @@ def _build_embedder(name: str):
         if not api_key:
             raise SystemExit(
                 "\n✖ the public index needs OPENAI_API_KEY — put it in .env "
-                "and rerun ./lofi.sh index-rag\n"
+                "and rerun ./locat.sh index-rag\n"
             )
         return OpenAIEmbedder(config.online_embed_model(), api_key)
     store.preflight_embed_model(config.embed_model(), config.ollama_api_url())
@@ -507,7 +507,7 @@ def _cli_index(data_dir=None, db=None, embedder: str = "ollama") -> None:
     if not any(p.is_file() for p in data_dir.rglob("*")):
         print(
             f"no documents yet — put .txt/.md/.csv/.pdf files in {data_dir} "
-            "and rerun ./lofi.sh index-rag"
+            "and rerun ./locat.sh index-rag"
         )
         return
     built = _build_embedder(embedder)
@@ -569,9 +569,9 @@ def _cli_stats(bare: bool, public: bool = False) -> None:
 def _main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="offline document + transactions index for lofi")
+    parser = argparse.ArgumentParser(description="offline document + transactions index for locat")
     subcommands = parser.add_subparsers(dest="command", required=True)
-    index_parser = subcommands.add_parser("index", help="rebuild the index from LOFI_RAG_DATA_DIR")
+    index_parser = subcommands.add_parser("index", help="rebuild the index from LOCAT_RAG_DATA_DIR")
     index_parser.add_argument("--data-dir", help="documents to index (default: per --embedder)")
     index_parser.add_argument("--db", help="SQLite index to write (default: per --embedder)")
     index_parser.add_argument(
@@ -582,7 +582,7 @@ def _main() -> None:
     )
     stats_parser = subcommands.add_parser("stats", help="print index summary")
     stats_parser.add_argument(
-        "--bare", action="store_true", help="one status line, for ./lofi.sh status"
+        "--bare", action="store_true", help="one status line, for ./locat.sh status"
     )
     stats_parser.add_argument(
         "--public", action="store_true", help="report the public (online-mode) index"

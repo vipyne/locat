@@ -2,11 +2,11 @@
 bot speech passes within the interval, speak a short reminder so a hung or
 forgotten tool call never ends in dead air.
 
-Armed by UserStoppedSpeakingFrame or a `lofi-busy` signal; disarmed by the
+Armed by UserStoppedSpeakingFrame or a `locat-busy` signal; disarmed by the
 user speaking again or bot text flowing through. While busy (a records lookup
 in flight), streamed LLM text does NOT disarm — while a backend works the front
 chats while the analyst works, and that chatter must not silence the watchdog.
-Busy clears on `lofi-idle`, a route line, a spoken answer, or `lofi-relay`
+Busy clears on `locat-idle`, a route line, a spoken answer, or `locat-relay`
 (backend answer delivered; relay run gets a fresh timer). The canned
 filler bypasses this processor (queued directly on the TTS service), so a
 spoken filler keeps it armed while a tool call runs. Reminders repeat up to
@@ -29,7 +29,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi.frames import RTVIServerMessageFrame
 
 from tools import BUSY_MESSAGE_TYPE, IDLE_MESSAGE_TYPE, RAG_MESSAGE_TYPE, RELAY_MESSAGE_TYPE
-from tunables import LOFI_REMINDER_PHRASE
+from tunables import LOCAT_REMINDER_PHRASE
 
 REMINDER_INTERVAL_SECS = 30.0
 MAX_REMINDERS = 3
@@ -38,7 +38,7 @@ MAX_REMINDERS = 3
 class SilenceWatchdog(FrameProcessor):
     def __init__(
         self,
-        phrase: str = LOFI_REMINDER_PHRASE,
+        phrase: str = LOCAT_REMINDER_PHRASE,
         interval_secs: float = REMINDER_INTERVAL_SECS,
         max_reminders: int = MAX_REMINDERS,
         **kwargs,

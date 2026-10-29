@@ -29,10 +29,10 @@ def run_configure(tmp_path: Path) -> str:
     (model_dir / ".llm-catalog").write_text(CATALOG)
     env = {
         **os.environ,
-        "LOFI_ENV_FILE": "/dev/null",
-        "LOFI_MODEL_DIR": str(model_dir),
-        "LOFI_CATALOG_MAX_AGE_DAYS": "0",
-        "LOFI_CONFIGURE_RAM_GB": "48",
+        "LOCAT_ENV_FILE": "/dev/null",
+        "LOCAT_MODEL_DIR": str(model_dir),
+        "LOCAT_CATALOG_MAX_AGE_DAYS": "0",
+        "LOCAT_CONFIGURE_RAM_GB": "48",
         "OLLAMA_HOST": f"127.0.0.1:{closed_port()}",
         "OLLAMA_MODELS": str(model_dir / "ollama"),
     }
@@ -144,12 +144,12 @@ def test_installed_model_size_is_decimal_gb_like_every_other_catalog_source(tmp_
     write_fake_manifest(model_dir / "ollama", "fakeinstalled", "9b", 15_000_000_000)
     env = {
         **os.environ,
-        "LOFI_ENV_FILE": "/dev/null",
-        "LOFI_MODEL_DIR": str(model_dir),
+        "LOCAT_ENV_FILE": "/dev/null",
+        "LOCAT_MODEL_DIR": str(model_dir),
         "OLLAMA_MODELS": str(model_dir / "ollama"),
         "OLLAMA_HOST": f"127.0.0.1:{closed_port()}",
-        "LOFI_CATALOG_MAX_AGE_DAYS": "0",
-        "LOFI_CONFIGURE_RAM_GB": "48",
+        "LOCAT_CATALOG_MAX_AGE_DAYS": "0",
+        "LOCAT_CONFIGURE_RAM_GB": "48",
     }
     result = subprocess.run(
         [str(REPO / "configure.sh"), "--catalogs"],

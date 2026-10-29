@@ -34,12 +34,12 @@ iteration; a blocker seen three iterations in a row is not retried)
 ## Iterations
 
 - **2026-09-16 — iteration 0 (human, not a loop run).** Re-pointed the loop at the
-  LO-FI RAG plan: SQLite (rows + FTS5 + sqlite-vec) behind four typed retrieval
+  locat RAG plan: SQLite (rows + FTS5 + sqlite-vec) behind four typed retrieval
   tools (lookup / filter_rows / aggregate / semantic_search), qwen3:8b with
   thinking disabled, always-on `rag_processor` retired. Previous locat-v2 plan
   archived to `ralph/PLAN-v2.md` (its HUMAN gates appended there); v2 Task 6
   "never speak thinking blocks" is subsumed by Task 4's think filter. Promise is
-  now `LOFI_RAG_COMPLETE`. Design source:
+  now `LOCAT_RAG_COMPLETE`. Design source:
   `/Users/vipyned2/.claude/plans/this-is-ultimately-going-fluttering-crystal.md`.
 
 - **2026-09-21 — iteration 0 again (human, not a loop run; no loop iterations had

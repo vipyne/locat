@@ -19,17 +19,17 @@ from scripts.prefetch_models import (
 
 
 def test_ollama_tags_lists_llm_embed_then_analyst(monkeypatch):
-    monkeypatch.setenv("LOFI_LLM_MODEL", "qwen2.5:14b")
-    monkeypatch.setenv("LOFI_EMBED_MODEL", "nomic-embed-text")
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "qwen3:8b")
+    monkeypatch.setenv("LOCAT_LLM_MODEL", "qwen2.5:14b")
+    monkeypatch.setenv("LOCAT_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "qwen3:8b")
 
     assert ollama_tags() == ["qwen2.5:14b", "nomic-embed-text", "qwen3:8b"]
 
 
 def test_ollama_tags_dedupes_identical_tags(monkeypatch):
-    monkeypatch.setenv("LOFI_LLM_MODEL", "same:1b")
-    monkeypatch.setenv("LOFI_EMBED_MODEL", "same:1b")
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "same:1b")
+    monkeypatch.setenv("LOCAT_LLM_MODEL", "same:1b")
+    monkeypatch.setenv("LOCAT_EMBED_MODEL", "same:1b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "same:1b")
 
     assert ollama_tags() == ["same:1b"]
 
@@ -37,9 +37,9 @@ def test_ollama_tags_dedupes_identical_tags(monkeypatch):
 # --- Daily call-machine bundle (airgapped browser sessions) -------------------
 
 LOCK = """{
-  "name": "lofi-client",
+  "name": "locat-client",
   "packages": {
-    "": {"name": "lofi-client"},
+    "": {"name": "locat-client"},
     "node_modules/@daily-co/daily-js": {
       "version": "0.90.0",
       "resolved": "https://registry.npmjs.org/@daily-co/daily-js/-/daily-js-0.90.0.tgz"
@@ -58,7 +58,7 @@ def test_daily_js_version_read_from_lock_file(tmp_path):
 
 def test_daily_js_version_without_entry_exits(tmp_path):
     lock = tmp_path / "package-lock.json"
-    lock.write_text('{"packages": {"": {"name": "lofi-client"}}}')
+    lock.write_text('{"packages": {"": {"name": "locat-client"}}}')
 
     with pytest.raises(SystemExit):
         daily_js_version(lock)

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Print the exact STT/LLM/TTS engines + models the bot will load.
 
-Shared by lofi.sh and configure.sh so the printed values can never drift from
+Shared by locat.sh and configure.sh so the printed values can never drift from
 what the bot actually loads: everything resolves through config.py (which
-loads ./.env), including the engine choice (LOFI_STT_ENGINE / LOFI_TTS_ENGINE) that
+loads ./.env), including the engine choice (LOCAT_STT_ENGINE / LOCAT_TTS_ENGINE) that
 services.py dispatches on.
 
 Each model line is followed by the full path of its weights on disk, found by
 looking where the engine would actually load from — the configured stores AND
 the tools' default caches — so the path shows where a model really is, not
-where the config wishes it were. Files outside LOFI_MODEL_DIR are flagged.
+where the config wishes it were. Files outside LOCAT_MODEL_DIR are flagged.
 """
 
 import json
@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
 
-OUTSIDE_FLAG = "⚠️  outside LOFI_MODEL_DIR"
+OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
 NOT_DOWNLOADED = "(not downloaded yet)"
 
 _WEIGHT_SUFFIXES = {".safetensors", ".bin", ".npz", ".onnx", ".pt"}
@@ -276,7 +276,7 @@ def _voice_files(directory: Path):
 
 
 def downloaded_entries() -> list[dict]:
-    """Every model actually on disk, across the lofi store AND the tools' home caches."""
+    """Every model actually on disk, across the locat store AND the tools' home caches."""
     entries: list[dict] = []
 
     seen_dirs: set[Path] = set()
@@ -327,7 +327,7 @@ def _print_downloaded() -> None:
         return
     any_outside = any(_outside_store(Path(e["path"])) for e in entries)
     if any_outside:
-        print(f"⚠️  = outside LOFI_MODEL_DIR ({config.model_dir()})")
+        print(f"⚠️  = outside LOCAT_MODEL_DIR ({config.model_dir()})")
         print("")
     total = sum(e["bytes"] for e in entries)
     name_width = max(len(e["name"]) for e in entries)
@@ -349,7 +349,7 @@ def _stt_line() -> str:
 
             return f"Whisper-MLX {name} ({MLXModel[name].value})"
         except (ImportError, KeyError):
-            # pipecat missing (deps not synced) or LOFI_WHISPER_MODEL not a valid
+            # pipecat missing (deps not synced) or LOCAT_WHISPER_MODEL not a valid
             # enum member — still print the configured name rather than dying.
             return f"Whisper-MLX {name}"
     if engine == "faster_whisper":
@@ -401,7 +401,7 @@ def online_model_entries() -> list[dict]:
 
 
 def model_entries(mode: str = "offline") -> list[dict]:
-    """Importable form of the model lines (bot_browser sends them as `lofi-config`)."""
+    """Importable form of the model lines (bot_browser sends them as `locat-config`)."""
     if mode == "online":
         return online_model_entries()
     ollama = f"(Ollama @ {config.ollama_base_url()})"

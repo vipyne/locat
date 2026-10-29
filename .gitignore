@@ -4,15 +4,15 @@ models/
 # Python virtual environment
 .venv/
 
-# lofi.sh runtime state (pidfiles for the processes lofi started)
-.lofi/
+# locat.sh runtime state (pidfiles for the processes locat started)
+.locat/
 
 # User documents indexed by RAG
 data/
 
-# Local settings (copied from lofirc.example; config only, never secrets)
-.lofirc
-.lofirc.bak
+# Local settings (copied from locatrc.example; config only, never secrets)
+.locatrc
+.locatrc.bak
 
 # Hosted API keys (copied from env.example)
 .env

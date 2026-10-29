@@ -121,7 +121,7 @@ def categories(db_path: Path) -> list[str]:
 def stats_summary(db_path: Path, data_dir: str) -> str:
     db_path = Path(db_path)
     if not has_index(db_path):
-        return "no index (run ./lofi.sh index-rag)"
+        return "no index (run ./locat.sh index-rag)"
     conn = sqlite3.connect(str(db_path))
     try:
         chunks = conn.execute("select count(*) from chunks").fetchone()[0]
@@ -141,7 +141,7 @@ def preflight_embed_model(model: str, api_url: str) -> None:
     except (httpx.HTTPError, OSError) as exc:
         sys.exit(
             f"\n✖ Cannot reach Ollama at {api_url}\n"
-            f"  Start it first:  ./lofi.sh start   (or: ollama serve)\n"
+            f"  Start it first:  ./locat.sh start   (or: ollama serve)\n"
             f"  Details: {exc}\n"
         )
     if not any(model == m or model.split(":")[0] == m.split(":")[0] for m in available):

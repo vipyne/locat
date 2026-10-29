@@ -1,14 +1,14 @@
 """Browser voice bot — same brain, echo cancellation free from the browser's getUserMedia.
 
-Serves the lofi client (client/dist/) and offers three transports. The client
+Serves the locat client (client/dist/) and offers three transports. The client
 picks by session mode: WebSocket for offline (pure TCP — connects with wi-fi
 off, and the only path that crosses Windows↔WSL2), SmallWebRTC for online
 (needs `uv sync --extra webrtc`; falls back to WebSocket after a failed
 connect).
 
 Run:
-    ./lofi.sh start
-    # opens http://localhost:7860 (the lofi client from client/dist/) — allow the mic, Connect.
+    ./locat.sh start
+    # opens http://localhost:7860 (the locat client from client/dist/) — allow the mic, Connect.
 
 Reuses the shared pipeline from pipeline.py (VADProcessor + Whisper/Ollama/Kokoro);
 only transport construction and per-transport event-handler shapes live here.
@@ -48,16 +48,16 @@ from scripts.prefetch_models import (
 )
 from scripts.print_models import model_entries
 
-# Shell env wins over .env (matches config.py and lofi.sh).
+# Shell env wins over .env (matches config.py and locat.sh).
 load_dotenv()
 
-CONFIG_MESSAGE_TYPE = "lofi-config"
+CONFIG_MESSAGE_TYPE = "locat-config"
 
 CLIENT_DIST = Path(__file__).resolve().parent / "client" / "dist"
 
 
 def _serve_client_dist(app) -> None:
-    """Register the lofi frontend on the dev runner's FastAPI app.
+    """Register the locat frontend on the dev runner's FastAPI app.
 
     The runner has no option for a custom static dir (its `_setup_frontend_routes`
     hardcodes the pipecat-ai-prebuilt UI, now uninstalled — it logs one startup
@@ -78,8 +78,8 @@ def _serve_client_dist(app) -> None:
             CLIENT_DIST / "index.html", headers={"Cache-Control": "no-cache"}
         )
 
-    @app.get("/api/lofi-mode", include_in_schema=False)
-    async def lofi_mode():
+    @app.get("/api/locat-mode", include_in_schema=False)
+    async def locat_mode():
         # Which sessions this process serves; the client greys out the
         # unavailable option in its mode picker.
         return {"mode": config.serve_mode()}
@@ -220,7 +220,7 @@ def vet_offline_session() -> None:
         raise RuntimeError(
             "offline session needs local models Ollama doesn't have: "
             f"{', '.join(missing)}. Pull them:  {PREFETCH_CMD}  — or, if you pulled "
-            f"them into a different Ollama, point lofi at it:  {RUN_OLLAMA_CMD}. "
+            f"them into a different Ollama, point locat at it:  {RUN_OLLAMA_CMD}. "
             "Or pick ☁️ online on the page."
         )
     logger.info(f"offline session OK: {', '.join(wanted)} available at {base_url}")
@@ -240,7 +240,7 @@ def _preflight_startup() -> None:
         )
 
 
-def _lofi_config_message(mode: str = OFFLINE_MODE) -> dict:
+def _locat_config_message(mode: str = OFFLINE_MODE) -> dict:
     rag = (
         public_rag_summary()
         if mode == ONLINE_MODE
@@ -251,7 +251,7 @@ def _lofi_config_message(mode: str = OFFLINE_MODE) -> dict:
         "mode": mode,
         "models": model_entries(mode),
         "ollama_host": config.ollama_base_url(),
-        "ollama_started_by_lofi": (Path(config.state_dir()) / "ollama.pid").is_file(),
+        "ollama_started_by_locat": (Path(config.state_dir()) / "ollama.pid").is_file(),
         "architecture": config.architecture(),
         "rag": rag,
     }
@@ -349,8 +349,8 @@ async def run_bot(
 
     @worker.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
-        logger.info("RTVI client ready — sending lofi-config")
-        await rtvi.send_server_message(_lofi_config_message(mode))
+        logger.info("RTVI client ready — sending locat-config")
+        await rtvi.send_server_message(_locat_config_message(mode))
 
     _register_webrtc_handlers(transport, worker, mode)
 

@@ -29,7 +29,7 @@ class FakeAsyncClient:
 
 
 def test_warmup_posts_load_only_generate(monkeypatch):
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "qwen3:8b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "qwen3:8b")
     client = FakeAsyncClient()
     asyncio.run(services.warm_analyst_model(client=client))
     assert len(client.posts) == 1
@@ -44,7 +44,7 @@ def test_warmup_posts_load_only_generate(monkeypatch):
 
 
 def test_warmup_with_system_messages_prefills_via_v1_chat(monkeypatch):
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "qwen3.8:27b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "qwen3.8:27b")
     client = FakeAsyncClient()
     messages = [
         {"role": "system", "content": "pairing instruction"},
@@ -75,12 +75,12 @@ def test_warmup_messages_match_the_live_backend_composition(tmp_path, monkeypatc
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     shutil.copy(fixtures / "transactions-small.csv", data_dir / "transactions.csv")
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest.ingest(data_dir, db_path, ingest.FakeEmbedder())
 
     backend = pipeline.build_records_backend(db_path)
     assert backend.context.messages[0]["content"] == pipeline.analyst_system_prompt(db_path)
-    assert backend.llm._composed_system_instruction == tunables.LOFI_BACKEND_PAIRING_INSTRUCTION
+    assert backend.llm._composed_system_instruction == tunables.LOCAT_BACKEND_PAIRING_INSTRUCTION
 
 
 def test_warmup_swallows_http_errors():

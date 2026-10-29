@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """prefetch_models.py — one-time ONLINE warm-up for EVERY default model.
 
-The whole point of ``lofi`` is a bot that runs 100% offline. This script
+The whole point of ``locat`` is a bot that runs 100% offline. This script
 downloads everything the bot needs NOW, while you still have connectivity, and
-steers every cache into ``$LOFI_MODEL_DIR`` (gitignored) so all checkpoints
+steers every cache into ``$LOCAT_MODEL_DIR`` (gitignored) so all checkpoints
 live next to the code. Run it once:
 
     uv run python scripts/prefetch_models.py
@@ -13,7 +13,7 @@ weight locally. What it fetches:
 
     * Ollama LLM + embed model — pulled via ``ollama pull`` (temporary
       ``ollama serve`` is started if none is running).
-    * STT — whichever engine LOFI_STT_ENGINE selects: Whisper-MLX snapshot on
+    * STT — whichever engine LOCAT_STT_ENGINE selects: Whisper-MLX snapshot on
       Apple Silicon, faster-whisper / Moonshine weights elsewhere.
     * Kokoro (TTS)       — ONNX model + voices bundle.
     * Silero VAD         — *bundled inside the pipecat package* (no download).
@@ -24,14 +24,14 @@ weight locally. What it fetches:
       (see bot_browser.py's /daily/ route).
 
 Config knobs (env or ./.env, all optional — sensible defaults):
-    LOFI_MODEL_DIR            the one directory all models go in  (default ./models)
-    LOFI_LLM_MODEL            Ollama tag for the pipeline LLM     (default qwen2.5:7b)
-    LOFI_EMBED_MODEL          Ollama tag for RAG embeddings       (default nomic-embed-text)
-    LOFI_STT_ENGINE           whisper_mlx | faster_whisper | moonshine
-    LOFI_WHISPER_MODEL        MLXModel member name                (default LARGE_V3_TURBO)
-    HF_HOME                    HF cache root       (default $LOFI_MODEL_DIR/huggingface)
-    LOFI_KOKORO_MODEL_PATH    Kokoro ONNX dest.   (default $LOFI_MODEL_DIR/kokoro/kokoro-v1.0.onnx)
-    LOFI_KOKORO_VOICES_PATH   Kokoro voices dest. (default $LOFI_MODEL_DIR/kokoro/voices-v1.0.bin)
+    LOCAT_MODEL_DIR            the one directory all models go in  (default ./models)
+    LOCAT_LLM_MODEL            Ollama tag for the pipeline LLM     (default qwen2.5:7b)
+    LOCAT_EMBED_MODEL          Ollama tag for RAG embeddings       (default nomic-embed-text)
+    LOCAT_STT_ENGINE           whisper_mlx | faster_whisper | moonshine
+    LOCAT_WHISPER_MODEL        MLXModel member name                (default LARGE_V3_TURBO)
+    HF_HOME                    HF cache root       (default $LOCAT_MODEL_DIR/huggingface)
+    LOCAT_KOKORO_MODEL_PATH    Kokoro ONNX dest.   (default $LOCAT_MODEL_DIR/kokoro/kokoro-v1.0.onnx)
+    LOCAT_KOKORO_VOICES_PATH   Kokoro voices dest. (default $LOCAT_MODEL_DIR/kokoro/voices-v1.0.bin)
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ from pathlib import Path
 
 # --- Resolve cache locations BEFORE importing any model library, so Hugging
 #     Face / MLX / Kokoro see them at import time. -------------------------------
-# Importing config does all of it: loads ./.env, resolves LOFI_MODEL_DIR, and
-# setdefaults HF_HOME / KOKORO_* / LOFI_PIPER_DOWNLOAD_DIR / OLLAMA_MODELS. Sharing
+# Importing config does all of it: loads ./.env, resolves LOCAT_MODEL_DIR, and
+# setdefaults HF_HOME / KOKORO_* / LOCAT_PIPER_DOWNLOAD_DIR / OLLAMA_MODELS. Sharing
 # that one resolver is what guarantees the prefetch writes exactly where the bot
 # later reads — the whole point of the warm-up.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -94,7 +94,7 @@ def daily_bundle_url(name: str) -> str:
 
 
 def daily_bundle_path(name: str) -> Path:
-    """Where a vendored bundle lives: $LOFI_MODEL_DIR/daily/<name>."""
+    """Where a vendored bundle lives: $LOCAT_MODEL_DIR/daily/<name>."""
     return Path(config.model_dir()) / "daily" / name
 
 
@@ -192,7 +192,7 @@ def prefetch_stt() -> None:
         except KeyError as exc:
             valid = ", ".join(m.name for m in MLXModel)
             raise SystemExit(
-                f"LOFI_WHISPER_MODEL='{whisper_model}' is not a valid MLXModel. Choose one of: {valid}"
+                f"LOCAT_WHISPER_MODEL='{whisper_model}' is not a valid MLXModel. Choose one of: {valid}"
             ) from exc
 
         logger.info(f"Whisper-MLX: downloading '{repo_id}' → {os.environ['HF_HOME']} ...")
@@ -208,7 +208,7 @@ def prefetch_stt() -> None:
 
 
 def prefetch_kokoro() -> None:
-    """Force Kokoro's ONNX model + voices bundle onto disk under $LOFI_MODEL_DIR/kokoro.
+    """Force Kokoro's ONNX model + voices bundle onto disk under $LOCAT_MODEL_DIR/kokoro.
 
     ``KokoroTTSService.__init__`` calls ``_ensure_model_files(model_path, voices_path)``,
     which downloads both files if they are missing, then loads them. Passing our
@@ -229,7 +229,7 @@ def prefetch_kokoro() -> None:
 
 
 def prefetch_daily_bundles() -> None:
-    """Download daily-js's bundles into $LOFI_MODEL_DIR/daily.
+    """Download daily-js's bundles into $LOCAT_MODEL_DIR/daily.
 
     Both browser transports stand up a DailyMediaManager for mic/device
     plumbing, and daily-js fetches that engine from c.daily.co at device init.

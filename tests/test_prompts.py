@@ -15,26 +15,26 @@ def test_split_front_prompt_opens_with_the_offline_identity():
 
 
 def test_online_split_prompts_open_with_their_identities():
-    assert tunables.LOFI_ONLINE_FRONT_PROMPT.startswith(ONLINE_IDENTITY)
-    assert tunables.LOFI_ONLINE_ANALYST_PROMPT.startswith("You are a documents analyst")
+    assert tunables.LOCAT_ONLINE_FRONT_PROMPT.startswith(ONLINE_IDENTITY)
+    assert tunables.LOCAT_ONLINE_ANALYST_PROMPT.startswith("You are a documents analyst")
 
 
 def test_simple_chat_prompt_carries_the_redirect_line():
     assert (
         "I can't look that up in this mode — restart me in the full finances mode."
-        in tunables.LOFI_SIMPLE_CHAT_PROMPT
+        in tunables.LOCAT_SIMPLE_CHAT_PROMPT
     )
 
 
 def test_simple_chat_prompt_is_date_grounded():
-    assert tunables.simple_chat_prompt().startswith(tunables.LOFI_SIMPLE_CHAT_PROMPT)
+    assert tunables.simple_chat_prompt().startswith(tunables.LOCAT_SIMPLE_CHAT_PROMPT)
     assert "Today's date is" in tunables.simple_chat_prompt()
 
 
 def test_offline_cascade_prompt_opens_with_the_offline_identity():
-    assert tunables.LOFI_OFFLINE_CASCADE_PROMPT.startswith(OFFLINE_IDENTITY)
+    assert tunables.LOCAT_OFFLINE_CASCADE_PROMPT.startswith(OFFLINE_IDENTITY)
 
 
 def test_offline_cascade_prompt_names_the_tools():
     for tool in ("lookup", "filter_rows", "aggregate", "semantic_search"):
-        assert tool in tunables.LOFI_OFFLINE_CASCADE_PROMPT
+        assert tool in tunables.LOCAT_OFFLINE_CASCADE_PROMPT

@@ -30,7 +30,7 @@ def db(tmp_path):
     data_dir.mkdir()
     shutil.copy(TRANSACTIONS_CSV, data_dir / "transactions.csv")
     shutil.copy(FIXTURES / "note.txt", data_dir / "note.txt")
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest.ingest(data_dir, db_path, ingest.FakeEmbedder())
     return db_path
 
@@ -39,7 +39,7 @@ def db(tmp_path):
 def stub_services(monkeypatch):
     # Generic pipeline-shape tests run on cascade: split needs real LLM
     # services (LLMWithBackend wraps them) and has its own dedicated tests.
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
     for name in ("build_stt", "build_llm", "build_tts", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda *a, **kw: FrameProcessor())
 
@@ -55,8 +55,8 @@ def tool_names(context) -> list[str]:
 
 
 def test_index_present_offers_the_four_retrieval_tools(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     assert sorted(tool_names(built.context)) == [
         "aggregate", "filter_rows", "lookup", "semantic_search",
@@ -64,40 +64,40 @@ def test_index_present_offers_the_four_retrieval_tools(db, monkeypatch, stub_ser
 
 
 def test_system_prompt_is_grounded_when_index_present(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
     import datetime
 
     import store
     import tunables
 
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     content = built.context.messages[0]["content"]
     assert "Today's date is" in content
     first, last = store.date_range(db)
     assert f"The transaction records run from {first} to {last}." in content
     assert "The transaction categories are: " in content
-    assert content.startswith(tunables.LOFI_OFFLINE_CASCADE_PROMPT)
+    assert content.startswith(tunables.LOCAT_OFFLINE_CASCADE_PROMPT)
     pinned = tunables.system_prompt(datetime.date(2026, 10, 12), (first, last))
-    assert pinned.startswith(tunables.LOFI_OFFLINE_CASCADE_PROMPT)
+    assert pinned.startswith(tunables.LOCAT_OFFLINE_CASCADE_PROMPT)
     assert pinned.endswith(f"Today's date is 2026-10-12. The transaction records run from {first} to {last}.")
 
 
 def test_no_index_offers_no_tools(tmp_path, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_RAG_DB", str(tmp_path / "missing" / "lofi.db"))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(tmp_path / "missing" / "locat.db"))
     built = pipeline.build_pipeline(fake_transport())
     assert tool_names(built.context) == []
 
 
 def test_pipeline_still_builds_without_an_index(tmp_path, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_RAG_DB", str(tmp_path / "missing" / "lofi.db"))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(tmp_path / "missing" / "locat.db"))
     built = pipeline.build_pipeline(fake_transport())
     assert built.pipeline is not None
     assert built.context.messages[0]["role"] == "system"
 
 
 def test_built_bot_exposes_llm_and_tts(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     assert built.llm is not None
     assert built.tts is not None
@@ -112,15 +112,15 @@ class EventfulLLM(FrameProcessor):
 
 
 def test_filler_registered_on_function_calls_started(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     monkeypatch.setattr(pipeline, "build_cascade_llm", lambda *a, **kw: EventfulLLM())
     built = pipeline.build_pipeline(fake_transport())
     assert built.llm._event_handlers["on_function_calls_started"].handlers
 
 
 def test_filler_phrase_is_short_spoken_text(db):
-    assert pipeline.LOFI_FILLER_PHRASE.endswith(".")
-    assert "{" not in pipeline.LOFI_FILLER_PHRASE
+    assert pipeline.LOCAT_FILLER_PHRASE.endswith(".")
+    assert "{" not in pipeline.LOCAT_FILLER_PHRASE
 
 
 def test_filler_handler_pushes_busy_message_and_filler(db, monkeypatch, stub_services):
@@ -145,7 +145,7 @@ def test_filler_handler_pushes_busy_message_and_filler(db, monkeypatch, stub_ser
         async def queue_frame(self, frame, *args, **kwargs):
             self.queued.append(frame)
 
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     monkeypatch.setattr(pipeline, "build_cascade_llm", lambda *a, **kw: RecordingLLM())
     monkeypatch.setattr(pipeline, "build_tts", RecordingTTS)
     built = pipeline.build_pipeline(fake_transport())
@@ -155,7 +155,7 @@ def test_filler_handler_pushes_busy_message_and_filler(db, monkeypatch, stub_ser
     busy = [f for f in built.llm.frames if isinstance(f, RTVIServerMessageFrame)]
     assert busy and busy[0].data == {"type": pipeline.BUSY_MESSAGE_TYPE}
     assert [f.text for f in built.tts.queued if isinstance(f, TTSSpeakFrame)] == [
-        pipeline.LOFI_FILLER_PHRASE
+        pipeline.LOCAT_FILLER_PHRASE
     ]
 
 
@@ -174,8 +174,8 @@ def test_llm_service_disables_reasoning():
 
 
 def test_invalid_architecture_exits_with_guidance(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "sandwich")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "sandwich")
     with pytest.raises(SystemExit):
         pipeline.build_pipeline(fake_transport())
 
@@ -183,7 +183,7 @@ def test_invalid_architecture_exits_with_guidance(db, monkeypatch, stub_services
 def test_pipeline_includes_the_silence_watchdog(db, monkeypatch, stub_services):
     from silence_watchdog import SilenceWatchdog
 
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     assert any(isinstance(p, SilenceWatchdog) for p in built.pipeline._processors)
 
@@ -196,8 +196,8 @@ def test_split_architecture_builds_llm_with_backend(db, monkeypatch):
 
     for name in ("build_stt", "build_tts", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
 
     # The front holds no records tools — delegate is a builtin, not a context tool.
@@ -221,8 +221,8 @@ def test_split_frontend_gets_domain_named_delegate(db, monkeypatch):
 
     for name in ("build_stt", "build_tts", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
 
     lwb = next(p for p in built.pipeline._processors if isinstance(p, LLMWithBackend))
@@ -231,14 +231,14 @@ def test_split_frontend_gets_domain_named_delegate(db, monkeypatch):
     assert "delegate" not in builtin
 
 
-def test_backend_worker_uses_LOFI_FRONTEND_PAIRING_INSTRUCTION(db):
+def test_backend_worker_uses_LOCAT_FRONTEND_PAIRING_INSTRUCTION(db):
     # Compact instruction replaces the stock frontier-sized one (Task 15).
     import tunables
     from pipecat.workers.llm.backend_llm_worker import BACKEND_PAIRING_INSTRUCTION
 
     worker = pipeline.build_records_backend(str(db))
     appended = worker.llm._appended_system_instructions
-    assert tunables.LOFI_BACKEND_PAIRING_INSTRUCTION in appended
+    assert tunables.LOCAT_BACKEND_PAIRING_INSTRUCTION in appended
     assert BACKEND_PAIRING_INSTRUCTION not in appended
 
 
@@ -259,20 +259,20 @@ def test_backend_transform_strips_think_and_is_awaitable(db):
 def test_split_pipeline_includes_backend_tool_panel(db, monkeypatch):
     for name in ("build_stt", "build_tts", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     assert any(isinstance(p, pipeline.BackendToolPanel) for p in built.pipeline._processors)
 
 
 def test_cascade_pipeline_has_no_backend_tool_panel(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
     assert not any(isinstance(p, pipeline.BackendToolPanel) for p in built.pipeline._processors)
 
 
-def test_backend_tool_panel_renders_lofi_rag_message(db):
+def test_backend_tool_panel_renders_locat_rag_message(db):
     import asyncio
 
     from pipecat.frames.frames import (
@@ -368,7 +368,7 @@ def test_cascade_filler_is_spoken_but_kept_out_of_context(db, monkeypatch, stub_
 
     from pipecat.frames.frames import TTSSpeakFrame
 
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     monkeypatch.setattr(pipeline, "build_cascade_llm", lambda *a, **kw: EventfulLLM())
     monkeypatch.setattr(pipeline, "build_tts", RecordingTTSService)
     built = pipeline.build_pipeline(fake_transport())
@@ -376,7 +376,7 @@ def test_cascade_filler_is_spoken_but_kept_out_of_context(db, monkeypatch, stub_
     asyncio.run(handler(built.llm, []))
 
     fillers = [f for f in built.tts.queued if isinstance(f, TTSSpeakFrame)]
-    assert [f.text for f in fillers] == [pipeline.LOFI_FILLER_PHRASE]
+    assert [f.text for f in fillers] == [pipeline.LOCAT_FILLER_PHRASE]
     # Canned waiting lines in the context teach a small front model to answer
     # with waiting lines (and then invent results) instead of delegating.
     assert fillers[0].append_to_context is False
@@ -390,15 +390,15 @@ def test_split_speaks_canned_filler_out_of_context(db, monkeypatch):
     for name in ("build_stt", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
     monkeypatch.setattr(pipeline, "build_tts", RecordingTTSService)
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
 
     front = built.llm.frontend
     handler = front._event_handlers["on_function_calls_started"].handlers[0]
     asyncio.run(handler(front, []))
     fillers = [f for f in built.tts.queued if isinstance(f, TTSSpeakFrame)]
-    assert [f.text for f in fillers] == [pipeline.LOFI_FILLER_PHRASE]
+    assert [f.text for f in fillers] == [pipeline.LOCAT_FILLER_PHRASE]
     # Waiting lines in the context teach the temp-0 front to answer records
     # questions with waiting lines and no tool call.
     assert fillers[0].append_to_context is False
@@ -690,8 +690,8 @@ def test_backend_tool_panel_announces_pending_call(db):
 def test_split_pipeline_warms_the_analyst(db, monkeypatch):
     for name in ("build_stt", "build_tts", "build_vad_processor"):
         monkeypatch.setattr(pipeline, name, lambda: FrameProcessor())
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     calls: list = []
     monkeypatch.setattr(
         services, "warm_analyst", lambda system_messages=None: calls.append(system_messages)
@@ -707,13 +707,13 @@ def test_split_pipeline_warms_the_analyst(db, monkeypatch):
     import tunables
 
     pairing, system = calls[0]
-    assert pairing["content"] == tunables.LOFI_BACKEND_PAIRING_INSTRUCTION
+    assert pairing["content"] == tunables.LOCAT_BACKEND_PAIRING_INSTRUCTION
     assert system["content"].startswith(tunables.ANALYST_SYSTEM_PROMPT)
 
 
 def test_cascade_pipeline_warms_its_own_model(db, monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
-    monkeypatch.setenv("LOFI_RAG_DB", str(db))
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     calls: list = []
     monkeypatch.setattr(
         services, "warm_analyst", lambda system_messages=None: calls.append(system_messages)
@@ -730,7 +730,7 @@ def test_cascade_pipeline_warms_its_own_model(db, monkeypatch, stub_services):
 
 
 def test_simple_chat_pipeline_warms_nothing(monkeypatch, stub_services):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade-simple-chat")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
     calls: list = []
     monkeypatch.setattr(
         services, "warm_analyst", lambda system_messages=None: calls.append(system_messages)

@@ -241,7 +241,7 @@ def test_analyst_followup_retrieval_then_grounded_quote_passes(monkeypatch):
     assert body["model"] == run_evals.config.rag_llm_model()
     assert body["messages"][0] == {
         "role": "system",
-        "content": run_evals.tunables.LOFI_BACKEND_PAIRING_INSTRUCTION,
+        "content": run_evals.tunables.LOCAT_BACKEND_PAIRING_INSTRUCTION,
     }
     assert body["messages"][1] == {"role": "system", "content": "analyst system"}
     assert body["messages"][2:] == run_evals.ANALYST_POISONED_CONTEXT

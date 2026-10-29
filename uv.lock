@@ -829,7 +829,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lofi"
+name = "locat"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

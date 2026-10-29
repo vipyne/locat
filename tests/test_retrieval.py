@@ -22,7 +22,7 @@ def db(tmp_path):
     shutil.copy(FIXTURES / "note.txt", data_dir / "note.txt")
     shutil.copy(FIXTURES / "note.md", data_dir / "note.md")
     shutil.copy(DATA_DIR / "passphrase-smoke.txt", data_dir / "passphrase-smoke.txt")
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest.ingest(data_dir, db_path, ingest.FakeEmbedder())
     return db_path
 

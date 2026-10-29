@@ -2,7 +2,7 @@
 
 `PARAMS` is the single source of truth for the tool schemas — `build_tools`
 turns it into pipecat FunctionSchemas with bundled handlers, and the evals
-build their OpenAI-format tool list from it. Each call pushes a `lofi-rag`
+build their OpenAI-format tool list from it. Each call pushes a `locat-rag`
 RTVI server message (route line: tool, args, count, elapsed) so the frontend
 shows how an answer was found.
 """
@@ -20,15 +20,15 @@ from pipecat.services.llm_service import FunctionCallParams
 
 import retrieval
 
-RAG_MESSAGE_TYPE = "lofi-rag"
-# Separate type: lofi-rag freezes the stopwatch, stops money rain and clears
+RAG_MESSAGE_TYPE = "locat-rag"
+# Separate type: locat-rag freezes the stopwatch, stops money rain and clears
 # the watchdog's busy flag, all of which belong to a FINISHED lookup.
-RAG_PENDING_MESSAGE_TYPE = "lofi-rag-pending"
-BUSY_MESSAGE_TYPE = "lofi-busy"
-IDLE_MESSAGE_TYPE = "lofi-idle"
+RAG_PENDING_MESSAGE_TYPE = "locat-rag-pending"
+BUSY_MESSAGE_TYPE = "locat-busy"
+IDLE_MESSAGE_TYPE = "locat-idle"
 # Backend answer delivered, front's relay run starting: watchdog clears busy
 # and restarts its timer fresh.
-RELAY_MESSAGE_TYPE = "lofi-relay"
+RELAY_MESSAGE_TYPE = "locat-relay"
 
 # Outer bound on one delegate call; the records agent's own deadline (60 s,
 # reasoning on) fires first.
@@ -212,7 +212,7 @@ PUBLIC_TOOL_NAMES = ("semantic_search",)
 
 
 def _rtvi_tools(db_path, embedder, names) -> list[FunctionSchema]:
-    """FunctionSchemas for `names`, each handler pushing a `lofi-rag` route line."""
+    """FunctionSchemas for `names`, each handler pushing a `locat-rag` route line."""
 
     funcs = {
         "lookup": retrieval.lookup,
@@ -272,5 +272,5 @@ def build_tools(db_path, embedder) -> list[FunctionSchema]:
 
 def build_public_tools(db_path, embedder) -> list[FunctionSchema]:
     """Online mode's one tool: semantic_search over the public index, pushing
-    the same `lofi-rag` route lines as build_tools."""
+    the same `locat-rag` route lines as build_tools."""
     return _rtvi_tools(db_path, embedder, PUBLIC_TOOL_NAMES)

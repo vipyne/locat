@@ -122,7 +122,7 @@ def test_front_chatter_does_not_disarm_while_busy():
         down, _up = await run_test(
             watchdog,
             frames_to_send=[
-                _rtvi("lofi-busy"),
+                _rtvi("locat-busy"),
                 LLMTextFrame("Let me check your records."),
                 SleepFrame(0.2),
             ],
@@ -139,7 +139,7 @@ def test_idle_signal_disarms_busy_watch():
     async def run():
         down, _up = await run_test(
             watchdog,
-            frames_to_send=[_rtvi("lofi-busy"), _rtvi("lofi-idle"), SleepFrame(0.2)],
+            frames_to_send=[_rtvi("locat-busy"), _rtvi("locat-idle"), SleepFrame(0.2)],
         )
         return down
 
@@ -154,7 +154,7 @@ def test_spoken_answer_clears_busy_watch():
         down, _up = await run_test(
             watchdog,
             frames_to_send=[
-                _rtvi("lofi-busy"),
+                _rtvi("locat-busy"),
                 TTSSpeakFrame("You spent $40.00."),
                 SleepFrame(0.2),
             ],
@@ -174,9 +174,9 @@ def test_relay_signal_retimes_stale_busy_deadline():
         down, _up = await run_test(
             watchdog,
             frames_to_send=[
-                _rtvi("lofi-busy"),
+                _rtvi("locat-busy"),
                 SleepFrame(0.08),
-                _rtvi("lofi-relay"),
+                _rtvi("locat-relay"),
                 SleepFrame(0.06),
                 LLMTextFrame("The passphrase is BLUE MANATEE 436921."),
                 SleepFrame(0.15),
@@ -195,8 +195,8 @@ def test_relay_that_hangs_still_gets_a_reminder():
         down, _up = await run_test(
             watchdog,
             frames_to_send=[
-                _rtvi("lofi-busy"),
-                _rtvi("lofi-relay"),
+                _rtvi("locat-busy"),
+                _rtvi("locat-relay"),
                 SleepFrame(0.2),
             ],
         )

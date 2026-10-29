@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # setup.sh — one-time setup for a fresh clone (README → Setup):
-# checks uv + Ollama (install hints when absent), seeds .lofirc and .env from
-# their examples, creates data/private, runs uv sync. ./lofi.sh setup lands here.
+# checks uv + Ollama (install hints when absent), seeds .locatrc and .env from
+# their examples, creates data/private, runs uv sync. ./locat.sh setup lands here.
 #
 # Model downloads are the separate one-time online step:
 #   uv run python scripts/prefetch_models.py
@@ -26,9 +26,9 @@ if (( missing_dep )); then
   exit 1
 fi
 
-if [[ ! -f .lofirc ]]; then
-  cp lofirc.example .lofirc
-  echo "setup: created .lofirc from lofirc.example (edit it to change models)"
+if [[ ! -f .locatrc ]]; then
+  cp locatrc.example .locatrc
+  echo "setup: created .locatrc from locatrc.example (edit it to change models)"
 fi
 if [[ ! -f .env ]]; then
   cp env.example .env
@@ -43,6 +43,6 @@ uv sync --inexact || { echo "setup: uv sync failed — see the error above" >&2;
 echo "setup: done. Next, the one-time online step (~12 GB of default models):"
 echo "         uv run python scripts/prefetch_models.py"
 echo "       then drop documents in data/ and build the index:"
-echo "         ./lofi.sh index-rag"
+echo "         ./locat.sh index-rag"
 echo "       then:"
-echo "         ./lofi.sh start"
+echo "         ./locat.sh start"

@@ -60,11 +60,11 @@ from services import (
 from silence_watchdog import SilenceWatchdog
 from tunables import (
     ANALYST_SYSTEM_PROMPT,
-    LOFI_BACKEND_PAIRING_INSTRUCTION,
-    LOFI_FRONTEND_PAIRING_INSTRUCTION,
+    LOCAT_BACKEND_PAIRING_INSTRUCTION,
+    LOCAT_FRONTEND_PAIRING_INSTRUCTION,
     DELEGATE_TOOL_DESCRIPTION,
     DELEGATE_TOOL_NAME,
-    LOFI_FILLER_PHRASE,
+    LOCAT_FILLER_PHRASE,
     QUESTION_PREFIX,
     SPLIT_FRONT_PROMPT,
     online_analyst_prompt,
@@ -111,7 +111,7 @@ def _index_ready(db_path) -> bool:
     if store.has_index(db_path):
         return True
     if not _missing_index_logged:
-        logger.info(f"no RAG index found at {db_path} — run ./lofi.sh index-rag")
+        logger.info(f"no RAG index found at {db_path} — run ./locat.sh index-rag")
         _missing_index_logged = True
     return False
 
@@ -129,7 +129,7 @@ def build_records_tools() -> list | None:
 
 # Shown in the What's Running panel's rag field when an online session has no
 # public index to retrieve from.
-NO_PUBLIC_INDEX_NOTICE = "no public index — run ./lofi.sh index-rag with OPENAI_API_KEY set"
+NO_PUBLIC_INDEX_NOTICE = "no public index — run ./locat.sh index-rag with OPENAI_API_KEY set"
 
 
 def public_rag_summary() -> str:
@@ -215,7 +215,7 @@ def build_records_connector():
         # empty append with run_llm=True runs the front on the context it
         # already holds, waits out in-flight speech, and persists no message.
         #
-        # Every front run triggered here also signals lofi-relay: the
+        # Every front run triggered here also signals locat-relay: the
         # watchdog's deadline armed at delegation restarts fresh for the
         # relay run, else it fires mid-relay and speaks a waiting line
         # after the answer already arrived.
@@ -264,7 +264,7 @@ def build_records_connector():
             )
 
     return RecordsBackendConnector(
-        frontend_pairing_instruction=LOFI_FRONTEND_PAIRING_INSTRUCTION,
+        frontend_pairing_instruction=LOCAT_FRONTEND_PAIRING_INSTRUCTION,
         # Post-delegate re-run narrates the handoff — or worse: the temp-0 7B
         # sometimes ANSWERS on that run with an invented passphrase, and
         # narrations accumulate in context as complete-looking answers the
@@ -321,19 +321,19 @@ def build_records_backend(db_path):
         ),
         transform_output=_strip_think_output,
         # Stock instruction inverts the >> mark on qwen3:8b — see the
-        # LOFI_BACKEND_PAIRING_INSTRUCTION comment in tunables.py.
-        pairing_instruction=LOFI_BACKEND_PAIRING_INSTRUCTION,
+        # LOCAT_BACKEND_PAIRING_INSTRUCTION comment in tunables.py.
+        pairing_instruction=LOCAT_BACKEND_PAIRING_INSTRUCTION,
     )
 
 
 class BackendToolPanel(FrameProcessor):
-    """Mirrors the backend worker's tool calls into the UI's lofi-rag panel.
+    """Mirrors the backend worker's tool calls into the UI's locat-rag panel.
 
     The backend's handlers run outside the pipeline, so they can't push RTVI
     frames themselves; LLMWithBackend re-announces each call downstream as
-    ExternalFunctionCall*Frames. Render each final result as the same lofi-rag
+    ExternalFunctionCall*Frames. Render each final result as the same locat-rag
     message the cascade handlers send (tools.build_tools), and each call's
-    start as a lofi-rag-pending message — an analyst turn runs 10-70 s, so the
+    start as a locat-rag-pending message — an analyst turn runs 10-70 s, so the
     panel shows the lookup in flight instead of staying empty until it lands."""
 
     def __init__(self):
@@ -493,7 +493,7 @@ def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltB
         # (service system instruction), then the context's system message.
         services.warm_analyst(
             system_messages=[
-                {"role": "system", "content": LOFI_BACKEND_PAIRING_INSTRUCTION},
+                {"role": "system", "content": LOCAT_BACKEND_PAIRING_INSTRUCTION},
                 {"role": "system", "content": analyst_system_prompt(db_path)},
             ]
         )
@@ -539,7 +539,7 @@ def build_pipeline(transport: BaseTransport, mode: str = OFFLINE_MODE) -> BuiltB
         @front.event_handler("on_function_calls_started")
         async def on_function_calls_started(service, function_calls):
             await service.push_frame(RTVIServerMessageFrame(data={"type": BUSY_MESSAGE_TYPE}))
-            await tts.queue_frame(TTSSpeakFrame(LOFI_FILLER_PHRASE, append_to_context=False))
+            await tts.queue_frame(TTSSpeakFrame(LOCAT_FILLER_PHRASE, append_to_context=False))
 
     pipeline = Pipeline(
         [

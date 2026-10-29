@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 LIBRARY = "https://ollama.com/library"
 REGISTRY = "https://registry.ollama.ai/v2/library"
-UA = {"User-Agent": "lofi-configure"}
+UA = {"User-Agent": "locat-configure"}
 MANIFEST = {**UA, "Accept": "application/vnd.docker.distribution.manifest.v2+json"}
 
 # Nothing above this can run on a consumer machine; skips ~25 pointless fetches.
@@ -28,7 +28,7 @@ MAX_PARAMS_B = 150
 WORKERS = 16
 # Wall-clock budget. Past it we stop fetching and emit what we have rather than
 # letting configure hang on a network that accepts connections but never answers.
-DEADLINE_SECS = float(os.environ.get("LOFI_CATALOG_DEADLINE", "45"))
+DEADLINE_SECS = float(os.environ.get("LOCAT_CATALOG_DEADLINE", "45"))
 START = time.monotonic()
 
 

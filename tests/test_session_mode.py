@@ -16,8 +16,8 @@ import config
 def fake_keys(monkeypatch):
     for name in config.ONLINE_KEY_NAMES:
         monkeypatch.setenv(name, f"fake-{name.lower()}")
-    monkeypatch.delenv("LOFI_ONLINE_ONLY", raising=False)
-    monkeypatch.delenv("LOFI_OFFLINE_ONLY", raising=False)
+    monkeypatch.delenv("LOCAT_ONLINE_ONLY", raising=False)
+    monkeypatch.delenv("LOCAT_OFFLINE_ONLY", raising=False)
 
 
 class FakeWebSocket:
@@ -73,42 +73,42 @@ def test_online_connect_with_all_keys_is_allowed():
 
 
 def test_online_only_rejects_offline_connect(monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
     with pytest.raises(RuntimeError) as excinfo:
         bot_browser.session_mode(ws_args(mode="offline"))
     assert "--online-only" in str(excinfo.value)
 
 
 def test_online_only_defaults_a_bare_connect_to_online(monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
     assert bot_browser.session_mode(ws_args()) == "online"
 
 
 def test_online_only_flag_parsing(monkeypatch):
     assert config.online_only() is False
     for raw in ("1", "true", "TRUE", "yes", "on"):
-        monkeypatch.setenv("LOFI_ONLINE_ONLY", raw)
+        monkeypatch.setenv("LOCAT_ONLINE_ONLY", raw)
         assert config.online_only() is True, raw
     for raw in ("", "0", "false", "no"):
-        monkeypatch.setenv("LOFI_ONLINE_ONLY", raw)
+        monkeypatch.setenv("LOCAT_ONLINE_ONLY", raw)
         assert config.online_only() is False, raw
 
 
 def test_offline_only_rejects_online_connect(monkeypatch):
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     with pytest.raises(RuntimeError) as excinfo:
         bot_browser.session_mode(ws_args(mode="online"))
     assert "--offline-only" in str(excinfo.value)
 
 
 def test_offline_only_bare_connect_stays_offline(monkeypatch):
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     assert bot_browser.session_mode(ws_args()) == "offline"
 
 
 def test_conflicting_config_serves_offline(monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     assert bot_browser.session_mode(ws_args()) == "offline"
     assert bot_browser.session_mode(ws_args(mode="offline")) == "offline"
     with pytest.raises(RuntimeError):
@@ -120,7 +120,7 @@ def test_offline_only_still_runs_local_preflights(monkeypatch):
     monkeypatch.setattr(bot_browser, "_preflight_llm", lambda url: ran.append("llm"))
     monkeypatch.setattr(bot_browser, "_preflight_stt", lambda: ran.append("stt"))
     monkeypatch.setattr(bot_browser, "_preflight_rag", lambda: ran.append("rag"))
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     bot_browser._preflight_local()
     assert ran == ["llm", "stt", "rag"]
 
@@ -128,33 +128,33 @@ def test_offline_only_still_runs_local_preflights(monkeypatch):
 def test_offline_only_flag_parsing(monkeypatch):
     assert config.offline_only() is False
     for raw in ("1", "true", "TRUE", "yes", "on"):
-        monkeypatch.setenv("LOFI_OFFLINE_ONLY", raw)
+        monkeypatch.setenv("LOCAT_OFFLINE_ONLY", raw)
         assert config.offline_only() is True, raw
     for raw in ("", "0", "false", "no"):
-        monkeypatch.setenv("LOFI_OFFLINE_ONLY", raw)
+        monkeypatch.setenv("LOCAT_OFFLINE_ONLY", raw)
         assert config.offline_only() is False, raw
 
 
 def test_offline_only_wins_a_conflict(monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     assert config.offline_only() is True
     assert config.online_only() is False
 
 
 def test_both_zero_means_both_modes(monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "0")
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "0")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "0")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "0")
     assert config.serve_mode() == "both"
 
 
 def test_serve_mode_names_each_restriction(monkeypatch):
     assert config.serve_mode() == "both"
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
     assert config.serve_mode() == "online-only"
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
     assert config.serve_mode() == "offline-only"
-    monkeypatch.delenv("LOFI_ONLINE_ONLY")
+    monkeypatch.delenv("LOCAT_ONLINE_ONLY")
     assert config.serve_mode() == "offline-only"
 
 
@@ -165,7 +165,7 @@ def test_online_only_skips_local_preflights(monkeypatch):
     monkeypatch.setattr(bot_browser, "_preflight_llm", boom)
     monkeypatch.setattr(bot_browser, "_preflight_stt", boom)
     monkeypatch.setattr(bot_browser, "_preflight_rag", boom)
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
     bot_browser._preflight_local()
 
 
@@ -188,26 +188,26 @@ def http_client():
     return TestClient(app)
 
 
-def test_lofi_mode_endpoint_reports_both(http_client):
-    resp = http_client.get("/api/lofi-mode")
+def test_locat_mode_endpoint_reports_both(http_client):
+    resp = http_client.get("/api/locat-mode")
     assert resp.status_code == 200
     assert resp.json() == {"mode": "both"}
 
 
-def test_lofi_mode_endpoint_reports_online_only(http_client, monkeypatch):
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
-    assert http_client.get("/api/lofi-mode").json() == {"mode": "online-only"}
+def test_locat_mode_endpoint_reports_online_only(http_client, monkeypatch):
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    assert http_client.get("/api/locat-mode").json() == {"mode": "online-only"}
 
 
-def test_lofi_mode_endpoint_reports_offline_only(http_client, monkeypatch):
-    monkeypatch.setenv("LOFI_OFFLINE_ONLY", "1")
-    assert http_client.get("/api/lofi-mode").json() == {"mode": "offline-only"}
+def test_locat_mode_endpoint_reports_offline_only(http_client, monkeypatch):
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
+    assert http_client.get("/api/locat-mode").json() == {"mode": "offline-only"}
 
 
 def test_offline_connect_missing_models_lists_all(monkeypatch):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_LLM_MODEL", "front-model:8b")
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "analyst-model:27b")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_LLM_MODEL", "front-model:8b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "analyst-model:27b")
     monkeypatch.setattr(bot_browser, "_ollama_model_ids", lambda url: {"someone-else:1b"})
     with pytest.raises(RuntimeError) as excinfo:
         bot_browser.vet_offline_session()
@@ -219,9 +219,9 @@ def test_offline_connect_missing_models_lists_all(monkeypatch):
 
 
 def test_offline_connect_with_every_model_pulled_is_allowed(monkeypatch):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_LLM_MODEL", "front-model:8b")
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "analyst-model:27b")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_LLM_MODEL", "front-model:8b")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "analyst-model:27b")
     monkeypatch.setattr(
         bot_browser,
         "_ollama_model_ids",

@@ -1,7 +1,7 @@
 """Tests for tools.build_tools — the four retrieval FunctionSchemas the
 pipeline model gets in the single-model cascade. Handlers run real retrieval
 against a fixture DB; the contract per call: a plain-dict result through
-result_callback (≤5 items, error dict on bad args) and one `lofi-rag` RTVI
+result_callback (≤5 items, error dict on bad args) and one `locat-rag` RTVI
 frame carrying the route line.
 """
 
@@ -27,7 +27,7 @@ def db(tmp_path):
     data_dir.mkdir()
     shutil.copy(FIXTURES / "transactions-small.csv", data_dir / "transactions.csv")
     shutil.copy(FIXTURES / "note.txt", data_dir / "note.txt")
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest.ingest(data_dir, db_path, ingest.FakeEmbedder())
     return db_path
 

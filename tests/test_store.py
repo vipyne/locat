@@ -25,13 +25,13 @@ def _insert_one_file_and_chunk(conn) -> None:
 
 
 def test_ensure_schema_creates_expected_tables(tmp_path):
-    conn = store.connect(tmp_path / "lofi.db")
+    conn = store.connect(tmp_path / "locat.db")
     assert EXPECTED_TABLES <= _table_names(conn)
     conn.close()
 
 
 def test_ensure_schema_idempotent(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     conn = store.connect(db_path)
     before = _table_names(conn)
     store.ensure_schema(conn)
@@ -42,7 +42,7 @@ def test_ensure_schema_idempotent(tmp_path):
 
 
 def test_connect_loads_vec_extension(tmp_path):
-    conn = store.connect(tmp_path / "lofi.db")
+    conn = store.connect(tmp_path / "locat.db")
     version = conn.execute("select vec_version()").fetchone()[0]
     assert isinstance(version, str) and version
     conn.close()
@@ -53,13 +53,13 @@ def test_has_index_false_on_missing_db(tmp_path):
 
 
 def test_has_index_false_on_empty_db(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     store.connect(db_path).close()
     assert store.has_index(db_path) is False
 
 
 def test_has_index_true_after_chunks_present(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     conn = store.connect(db_path)
     _insert_one_file_and_chunk(conn)
     conn.close()
@@ -69,21 +69,21 @@ def test_has_index_true_after_chunks_present(tmp_path):
 def test_stats_summary_no_index_missing_db(tmp_path):
     assert (
         store.stats_summary(tmp_path / "nope.db", "data")
-        == "no index (run ./lofi.sh index-rag)"
+        == "no index (run ./locat.sh index-rag)"
     )
 
 
 def test_stats_summary_no_index_empty_db(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     store.connect(db_path).close()
     assert (
         store.stats_summary(db_path, "data")
-        == "no index (run ./lofi.sh index-rag)"
+        == "no index (run ./locat.sh index-rag)"
     )
 
 
 def test_stats_summary_populated(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     conn = store.connect(db_path)
     _insert_one_file_and_chunk(conn)
     conn.execute(
@@ -96,7 +96,7 @@ def test_stats_summary_populated(tmp_path):
 
 
 def test_date_range_returns_min_and_max(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     conn = store.connect(db_path)
     _insert_one_file_and_chunk(conn)
     conn.executemany(
@@ -110,7 +110,7 @@ def test_date_range_returns_min_and_max(tmp_path):
 
 
 def test_date_range_none_without_rows(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     store.connect(db_path).close()
     assert store.date_range(db_path) is None
 
@@ -120,7 +120,7 @@ def test_date_range_none_for_missing_db(tmp_path):
 
 
 def test_categories_sorted_distinct(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     conn = store.connect(db_path)
     _insert_one_file_and_chunk(conn)
     conn.executemany(

@@ -4,8 +4,8 @@ The three service builders live here, OUTSIDE the bot files, so that switching
 engines (via ``.env`` / ``./configure.sh -i``) never touches ``bot.py`` /
 ``bot_browser.py`` — customize your pipeline freely in bot*.py.
 
-Each builder reads its engine choice from config (``LOFI_STT_ENGINE`` /
-``LOFI_TTS_ENGINE``) and constructs the matching Pipecat service:
+Each builder reads its engine choice from config (``LOCAT_STT_ENGINE`` /
+``LOCAT_TTS_ENGINE``) and constructs the matching Pipecat service:
 
     STT: whisper_mlx (default) | faster_whisper | moonshine
     LLM: Ollama (the only local LLM path)
@@ -46,7 +46,7 @@ def _engine_exit(engine: str, extra: str, exc: Exception) -> "None":
 def stt_weights_location(repo_id: str) -> tuple[str, Path] | None:
     """Where the configured STT model's weights sit on this machine.
 
-    ("store", snapshot_dir) when the lofi store ($HF_HOME) holds them,
+    ("store", snapshot_dir) when the locat store ($HF_HOME) holds them,
     ("external", snapshot_dir) when only a fallback Hugging Face cache does,
     None when no local cache has real weight files.
     """
@@ -81,14 +81,14 @@ def _stt_model_arg(configured: str) -> str:
 
 
 def build_stt():
-    """Build the speech-to-text service selected by ``LOFI_STT_ENGINE``."""
+    """Build the speech-to-text service selected by ``LOCAT_STT_ENGINE``."""
     engine = config.stt_engine()
 
     if engine == "whisper_mlx":
         if not config.IS_APPLE_SILICON:
             sys.exit(
-                "\n✖ LOFI_STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
-                "  Set LOFI_STT_ENGINE=faster_whisper in .env (or run ./configure.sh -i)\n"
+                "\n✖ LOCAT_STT_ENGINE=whisper_mlx requires an Apple Silicon Mac (MLX only runs there)\n"
+                "  Set LOCAT_STT_ENGINE=faster_whisper in .env (or run ./configure.sh -i)\n"
             )
         from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 
@@ -114,7 +114,7 @@ def build_stt():
         return MoonshineSTTService(settings=MoonshineSTTService.Settings(model=model.value))
 
     sys.exit(
-        f"\n✖ Unknown LOFI_STT_ENGINE '{engine}'"
+        f"\n✖ Unknown LOCAT_STT_ENGINE '{engine}'"
         f" — valid: whisper_mlx (default), faster_whisper, moonshine\n"
     )
 
@@ -159,7 +159,7 @@ def build_online_llm(temperature: float | None = None):
 
 
 def build_online_backend_llm():
-    """OpenAI LLM for the online documents analyst (LOFI_ONLINE_RAG_LLM_MODEL)."""
+    """OpenAI LLM for the online documents analyst (LOCAT_ONLINE_RAG_LLM_MODEL)."""
     from pipecat.services.openai.llm import OpenAILLMService
 
     return OpenAILLMService(
@@ -204,7 +204,7 @@ def build_llm(temperature: float | None = None):
 
 def build_cascade_llm():
     """The offline cascade's LLM: holds the four records tools directly on
-    LOFI_RAG_LLM_MODEL (no split front/analyst).
+    LOCAT_RAG_LLM_MODEL (no split front/analyst).
 
     Reasoning-off for the same reason as ``build_llm``: qwen3 ``<think>``
     must not reach TTS.
@@ -221,7 +221,7 @@ def build_cascade_llm():
 
 
 def build_backend_llm():
-    """The records backend's LLM (LOFI_RAG_LLM_MODEL, thinking allowed).
+    """The records backend's LLM (LOCAT_RAG_LLM_MODEL, thinking allowed).
 
     No reasoning-off override: the BackendLLMWorker renders model output as
     spoken-or-note, so thinking never reaches TTS; pipeline.py additionally
@@ -297,7 +297,7 @@ def warm_analyst(system_messages=None) -> None:
 
 
 def build_tts():
-    """Build the text-to-speech service selected by ``LOFI_TTS_ENGINE``."""
+    """Build the text-to-speech service selected by ``LOCAT_TTS_ENGINE``."""
     engine = config.tts_engine()
 
     if engine == "kokoro":
@@ -323,4 +323,4 @@ def build_tts():
             text_filters=[SpokenTextFilter()],
         )
 
-    sys.exit(f"\n✖ Unknown LOFI_TTS_ENGINE '{engine}' — valid: kokoro (default), piper\n")
+    sys.exit(f"\n✖ Unknown LOCAT_TTS_ENGINE '{engine}' — valid: kokoro (default), piper\n")

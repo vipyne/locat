@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
 # run_ollama.sh — start a local Ollama server whose model store lives INSIDE this
-# one model directory ($LOFI_MODEL_DIR/ollama), then pull the conversation LLM
+# one model directory ($LOCAT_MODEL_DIR/ollama), then pull the conversation LLM
 # and the records LLM.
 #
-# Why relocate the store: the whole point of `lofi` is a self-contained, fully
-# offline bot. Keeping the Ollama blobs under $LOFI_MODEL_DIR means every
+# Why relocate the store: the whole point of `locat` is a self-contained, fully
+# offline bot. Keeping the Ollama blobs under $LOCAT_MODEL_DIR means every
 # checkpoint the bot needs lives in one place — see scripts/model_dir.sh.
 #
 # Usage:
 #   ./scripts/run_ollama.sh            # serve + pull both default models
-#   LOFI_LLM_MODEL=qwen2.5:7b ./scripts/run_ollama.sh
+#   LOCAT_LLM_MODEL=qwen2.5:7b ./scripts/run_ollama.sh
 #
 # The server keeps running in the foreground so you can Ctrl-C to stop it, or run
 # the whole script in the background (`./scripts/run_ollama.sh &`). The bot talks
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# --- load .env defaults (LOFI_LLM_MODEL, OLLAMA_HOST); real env vars win ---------
+# --- load .env defaults (LOCAT_LLM_MODEL, OLLAMA_HOST); real env vars win ---------
 # .env supplies DEFAULTS only — values already in the environment (e.g. set on
 # the command line) win, matching config.py's load_dotenv behavior.
 load_env_defaults() {
@@ -35,19 +35,19 @@ load_env_defaults() {
     if [[ -z "${!key+x}" ]]; then export "$key=$value"; fi
   done < "$file"
 }
-load_env_defaults "${LOFI_ENV_FILE:-${REPO_ROOT}/.env}"
+load_env_defaults "${LOCAT_ENV_FILE:-${REPO_ROOT}/.env}"
 
 # --- config (env-overridable) ------------------------------------------------
-# Resolves LOFI_MODEL_DIR and exports OLLAMA_MODELS (plus the other engines'
+# Resolves LOCAT_MODEL_DIR and exports OLLAMA_MODELS (plus the other engines'
 # stores) so the LLM lands in the same directory as every other model.
-LOFI_REPO_ROOT="${REPO_ROOT}"
+LOCAT_REPO_ROOT="${REPO_ROOT}"
 # shellcheck source=model_dir.sh
 . "${SCRIPT_DIR}/model_dir.sh"
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_HOST
 # must match config.llm_model()'s default (shell can't import Python)
-LOFI_LLM_MODEL="${LOFI_LLM_MODEL:-qwen2.5:7b}"
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:7b}"
 
 # Conversation model and the embedder stay co-resident; a swap
 # costs a few seconds of weight loading per question.
@@ -64,7 +64,7 @@ mkdir -p "${OLLAMA_MODELS}"
 
 echo "run_ollama: OLLAMA_MODELS=${OLLAMA_MODELS}"
 echo "run_ollama: OLLAMA_HOST=${OLLAMA_HOST}"
-echo "run_ollama: LOFI_LLM_MODEL=${LOFI_LLM_MODEL}"
+echo "run_ollama: LOCAT_LLM_MODEL=${LOCAT_LLM_MODEL}"
 
 # --- is a server already listening on this host? ----------------------------
 # `ollama list` returns non-zero if it can't reach a server.
@@ -98,7 +98,7 @@ fi
 # --- pull models (skipped when already in the store) -------------------------
 # `ollama pull` dials the registry even for present models, which fails offline.
 tag_present() { OLLAMA_HOST="${OLLAMA_HOST}" ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qxF "$1"; }
-for tag in "${LOFI_LLM_MODEL}"; do
+for tag in "${LOCAT_LLM_MODEL}"; do
   if tag_present "${tag}"; then
     echo "run_ollama: '${tag}' already in the store — not pulling."
   else

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""preflight.py — list what ``./lofi.sh start`` still lacks.
+"""preflight.py — list what ``./locat.sh start`` still lacks.
 
 Prints one line per missing prerequisite, ``<kind> <detail>``, and nothing
-when the machine is ready. lofi.sh reads the lines and points at the fix.
+when the machine is ready. locat.sh reads the lines and points at the fix.
 
     extra <name>      an optional uv extra the configured engines need
     ollama <tag>      an Ollama model the offline stack loads
@@ -55,7 +55,7 @@ def _served_tags() -> set[str] | None:
 
 def offline_tags() -> list[str]:
     tags = [config.llm_model(), config.embed_model()]
-    # llmwithbackend's analyst and cascade's tool-holder both run LOFI_RAG_LLM_MODEL.
+    # llmwithbackend's analyst and cascade's tool-holder both run LOCAT_RAG_LLM_MODEL.
     if config.architecture() != "cascade-simple-chat":
         tags.append(config.rag_llm_model())
     return list(dict.fromkeys(tags))

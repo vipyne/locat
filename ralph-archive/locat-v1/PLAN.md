@@ -1,4 +1,4 @@
-# LO-FI RAG Layer Implementation Plan
+# locat RAG Layer Implementation Plan
 
 > **For agentic workers:** Executed by a ralph loop (`ralph/ralph.sh` +
 > `ralph/PROMPT.md`), one task per iteration. Tick checkboxes in this file as you

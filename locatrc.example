@@ -1,0 +1,57 @@
+# LOCAT_* are for this repo. HF_* and OLLAMA_* are read by huggingface_hub and ollama.
+# Values shown are the defaults. See README.md
+# Prompts and model defaults live in tunables.py — edit that file directly.
+
+LOCAT_MODEL_DIR=./models
+
+#LOCAT_ARCHITECTURE=llmwithbackend            # llmwithbackend (default: front + analyst backend) | cascade (STT,LLM,TTS)
+                                             # flags win: ./locat.sh start --cascade | --llmwithbackend
+
+#LOCAT_ONLINE_ONLY=0                          # 1 = serve online sessions only (./locat.sh start --online-only)
+#LOCAT_OFFLINE_ONLY=0                         # 1 = serve offline sessions only (./locat.sh start --offline-only); wins when both are set
+
+#LOCAT_LLM_MODEL=qwen2.5:7b
+#LOCAT_RAG_LLM_MODEL=qwen3:8b                 # records analyst backend; needs real API tool calls
+
+#LOCAT_OLLAMA_BASE_URL=http://localhost:11434/v1
+#LOCAT_EMBED_MODEL=nomic-embed-text
+
+#LOCAT_RAG_DATA_DIR=./data
+#LOCAT_RAG_INDEX_DIR=./models/rag-index
+#LOCAT_RAG_DB=./models/rag-index/locat.db
+#LOCAT_RAG_CHUNK_TOKENS=500
+#LOCAT_RAG_CHUNK_OVERLAP=50
+
+#LOCAT_STT_ENGINE=whisper_mlx                 # whisper_mlx | faster_whisper | moonshine
+#LOCAT_WHISPER_MODEL=LARGE_V3_TURBO
+#LOCAT_FASTER_WHISPER_MODEL=DISTIL_MEDIUM_EN
+#LOCAT_MOONSHINE_MODEL=SMALL_STREAMING
+
+#LOCAT_TTS_ENGINE=kokoro                      # kokoro | piper
+#LOCAT_KOKORO_VOICE=af_heart
+#LOCAT_PIPER_VOICE=en_US-lessac-medium
+
+# for Headphones version
+#LOCAT_INPUT_DEVICE_INDEX=
+#LOCAT_OUTPUT_DEVICE_INDEX=
+
+#LOCAT_GREETING_DELAY_SECS=1.0
+
+#LOCAT_LOG_LEVEL=DEBUG
+#LOCAT_WEB_PORT=7860
+#LOCAT_OPEN_BROWSER=1                         # 0 = don't auto-open the page (always skipped on WSL)
+#LOCAT_STATE_DIR=.locat
+
+#LOCAT_VAD_CONFIDENCE=0.7
+#LOCAT_VAD_MIN_VOLUME=0.0
+#LOCAT_VAD_START_SECS=0.2
+#LOCAT_VAD_STOP_SECS=0.2
+
+#LOCAT_KOKORO_MODEL_PATH=./models/kokoro/kokoro-v1.0.onnx
+#LOCAT_KOKORO_VOICES_PATH=./models/kokoro/voices-v1.0.bin
+#LOCAT_PIPER_DOWNLOAD_DIR=./models/piper
+
+#HF_HOME=./models/huggingface
+#HF_HUB_DISABLE_PROGRESS_BARS=1
+#OLLAMA_MODELS=/absolute/path/to/ollama-store
+#OLLAMA_HOST=127.0.0.1:11434

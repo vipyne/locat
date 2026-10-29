@@ -11,27 +11,27 @@ What lives here:
   - every system prompt, tool description, and nudge, grouped by the
     architecture that runs it (sections 3-4), then the grounding helpers that
     compose them (section 5):
-      3a. offline simple chat        (LOFI_ARCHITECTURE=cascade-simple-chat)
-      3b. offline finances cascade   (LOFI_ARCHITECTURE=cascade)
-      3c. offline finances split     (LOFI_ARCHITECTURE=llmwithbackend)
-      4a. online cascade             (LOFI_ONLINE_ARCHITECTURE=cascade)
-      4b. online split               (LOFI_ONLINE_ARCHITECTURE=llmwithbackend)
+      3a. offline simple chat        (LOCAT_ARCHITECTURE=cascade-simple-chat)
+      3b. offline finances cascade   (LOCAT_ARCHITECTURE=cascade)
+      3c. offline finances split     (LOCAT_ARCHITECTURE=llmwithbackend)
+      4a. online cascade             (LOCAT_ONLINE_ARCHITECTURE=cascade)
+      4b. online split               (LOCAT_ONLINE_ARCHITECTURE=llmwithbackend)
 
 What deliberately lives elsewhere:
   - model tags, voice ids, architecture — defaults inline in `config.py`'s
-    getters; override them with `LOFI_*` vars in `.lofirc` at the repo root
-    (`lofirc.example` is the template)
+    getters; override them with `LOCAT_*` vars in `.locatrc` at the repo root
+    (`locatrc.example` is the template)
   - retrieval tool JSON schemas and their per-parameter descriptions —
     `tools.PARAMS` (they embed enums computed from `retrieval.COLUMN_SQL`,
     `OPERATORS`, `ORDER_SQL`; schema-structural, not tunable prose)
   - plumbing knobs: URLs, cache paths, VAD, chunking, timeouts, log
     level — `config.py`
 
-Env vars: `LOFI_*` env vars override the section-1 engine defaults at runtime;
+Env vars: `LOCAT_*` env vars override the section-1 engine defaults at runtime;
 `.env` holds only the three online-session API keys. Prompts have no env
 override — editing this file IS the mechanism.
 
-KV-cache rule: `LOFI_OFFLINE_CASCADE_PROMPT` and `ANALYST_SYSTEM_PROMPT` stay free of per-call
+KV-cache rule: `LOCAT_OFFLINE_CASCADE_PROMPT` and `ANALYST_SYSTEM_PROMPT` stay free of per-call
 data so Ollama's prefix cache survives between turns. Grounding (today's date,
 records range, categories) is appended as a suffix (`system_prompt`) or
 prepended to the user message (`rag_agent.grounded_question`). Never template
@@ -39,7 +39,7 @@ per-call values into the prompt bodies.
 
 Prompts can be swapped per model with a plain conditional — no dispatch
 machinery needed:
-# if os.environ.get("LOFI_LLM_MODEL", "").startswith("llama"):
+# if os.environ.get("LOCAT_LLM_MODEL", "").startswith("llama"):
 #     SPLIT_FRONT_PROMPT = ...
 
 Import rule: stdlib only. `config` imports `tunables`, never the reverse, and
@@ -53,7 +53,7 @@ import datetime
 import platform
 
 # ===========================================================================
-# 1. ENGINE DEFAULTS — edit freely; LOFI_* env vars override
+# 1. ENGINE DEFAULTS — edit freely; LOCAT_* env vars override
 # ===========================================================================
 
 # Whisper-MLX needs an Apple-Silicon GPU (MLX ships no other macOS builds);
@@ -67,36 +67,36 @@ DEFAULT_TTS_ENGINE = "kokoro"
 # ===========================================================================
 
 # First thing the bot says, once the transport is up.
-LOFI_GREETING = "Hi. I'm your private, offline financial thinking partner. What's on your mind today?"
+LOCAT_GREETING = "Hi. I'm your private, offline financial thinking partner. What's on your mind today?"
 
 # First thing the bot says in an online session (cloud cascade, public
 # documents only).
-LOFI_ONLINE_GREETING = "Hi. I'm your online financial thinking partner. Ask me about the tax code from the public documents, or practice a language with me."
+LOCAT_ONLINE_GREETING = "Hi. I'm your online financial thinking partner. Ask me about the tax code from the public documents, or practice a language with me."
 
 # First thing the bot says in a simple-chat session (chat only, no records
 # access) — it promises nothing it cannot do.
-LOFI_SIMPLE_CHAT_GREETING = "Hi. I'm your offline voice assistant, running right here on your machine. What would you like to talk about?"
+LOCAT_SIMPLE_CHAT_GREETING = "Hi. I'm your offline voice assistant, running right here on your machine. What would you like to talk about?"
 
 # Queued on the TTS service while a records lookup starts.
-LOFI_FILLER_PHRASE = "Let me check your records."
+LOCAT_FILLER_PHRASE = "Let me check your records."
 
 # Spoken by silence_watchdog when a turn goes quiet mid-lookup.
-LOFI_REMINDER_PHRASE = "I'm still working on it."
+LOCAT_REMINDER_PHRASE = "I'm still working on it."
 
 # Records agent could not reach Ollama or the store.
-LOFI_FALLBACK_ANSWER = "Sorry, I couldn't reach your records just now. Please try that question again."
+LOCAT_FALLBACK_ANSWER = "Sorry, I couldn't reach your records just now. Please try that question again."
 
 # ===========================================================================
 # 3. OFFLINE — a. SIMPLE CHAT (no tools, no records)
 # ===========================================================================
 
 # Chat-only prompt for the simple-chat architecture
-# (LOFI_ARCHITECTURE=cascade-simple-chat): one small model, no tools, no index.
+# (LOCAT_ARCHITECTURE=cascade-simple-chat): one small model, no tools, no index.
 # The redirect line is spoken verbatim when the user asks about their records —
 # the model holds no retrieval tool in this mode, so a promise to look
 # something up is a promise it cannot keep. Keep this body free of per-call
 # data; grounding arrives as the `simple_chat_prompt()` suffix.
-LOFI_SIMPLE_CHAT_PROMPT = """\
+LOCAT_SIMPLE_CHAT_PROMPT = """\
 You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Always write numbers as digits — $44,725, 12%, not spelled out — they are converted to speech automatically. Respond to what the user said in a creative, helpful, and brief way.
 
 You run entirely offline on the user's own computer — nothing they say leaves this machine. In this mode you have no access to their financial records, transactions, or saved documents, and no tool here reaches them. Asked about any of it — a transaction, an amount, a merchant, a date, a balance, a total, or something they saved in a note or a document — say exactly this and nothing more: I can't look that up in this mode — restart me in the full finances mode. Never invent a record, a number, a merchant, a date, or something they stored, and never offer to look one up.\
@@ -106,15 +106,15 @@ You run entirely offline on the user's own computer — nothing they say leaves 
 # 3b. OFFLINE — FINANCES CASCADE (one model holds the four tools)
 # ===========================================================================
 
-# Conversation prompt for the finances cascade (LOFI_ARCHITECTURE=cascade):
-# one model on LOFI_RAG_LLM_MODEL holding the four retrieval tools and talking
+# Conversation prompt for the finances cascade (LOCAT_ARCHITECTURE=cascade):
+# one model on LOCAT_RAG_LLM_MODEL holding the four retrieval tools and talking
 # to the user directly — no `>>` spoken-mark protocol, no analyst framing.
 # First paragraph is byte-identical to SPLIT_FRONT_PROMPT's identity paragraph
 # (section 3c); the tool and spoken-answer rules are adapted from
 # ANALYST_SYSTEM_PROMPT (section 3c), which measured them. Stays free of
 # per-call data for the KV-prefix cache — grounding is the `system_prompt()`
 # suffix.
-LOFI_OFFLINE_CASCADE_PROMPT = """\
+LOCAT_OFFLINE_CASCADE_PROMPT = """\
 You are a private financial thinking partner. You run entirely offline on the user's own computer — nothing they say leaves this machine, and that privacy is exactly why they can think out loud with you about money.
 
 You answer questions about the user's own transactions and saved documents by calling the retrieval tools you have been given. Use lookup to find a specific transaction by merchant name or transaction id. Use filter_rows to list transactions matching a condition, sorted how you ask — more conditions go in its filters list. Use aggregate to count or total amounts, with up to three filters — a question naming a period needs a date filter in the filters list. For anything about documents or notes rather than the transaction table, always call semantic_search first; never answer about documents from memory.
@@ -177,12 +177,12 @@ Look up anything in the user's own financial records and saved documents: transa
 # bare-id, passphrase) to the tool; verify changes with evals --stage followup.
 
 # Overrides Pipecat's stock FRONTEND_PAIRING_INSTRUCTION
-LOFI_FRONTEND_PAIRING_INSTRUCTION = f"""\
+LOCAT_FRONTEND_PAIRING_INSTRUCTION = f"""\
 RECORDS HANDOFF: For ANY question about the user's transactions, spending, merchants, amounts, dates, totals, balances, documents, or a follow-up to an earlier records answer, you MUST call the {DELEGATE_TOOL_NAME} tool in that same reply. Do not answer such questions yourself and never invent numbers. To the user there is one assistant: you — never mention the analyst, tools, or handoffs. The analyst's findings arrive later as internal conversation messages; when one brings a result, tell the user what it says in your own words, once. Internal progress or thinking notes are never read aloud and never guessed from. A vague or oddly worded records question is still a records question: do not ask the user to clarify dates, ranges, or wording, and do not refuse — call the tool and the analyst sorts it out. The analyst knows today's date and the records themselves, so it resolves things like 'this month' or 'two months ago' on its own, looks up a bare number as a transaction id, and retrieves anything the user stored, a passphrase included.\
 """
 
 # System prompt for the records analyst — the thinking half of the split
-# architecture (LOFI_ARCHITECTURE=llmwithbackend).
+# architecture (LOCAT_ARCHITECTURE=llmwithbackend).
 #
 # It never talks to the user directly: rag_agent drives it over Ollama's native
 # API with reasoning ON, it calls the four typed retrieval tools, and composes
@@ -218,7 +218,7 @@ Your final answer is spoken out loud: one or two short sentences of plain speech
 # keep them in sync.
 
 # Overrides Pipecat's stock BACKEND_PAIRING_INSTRUCTION
-LOFI_BACKEND_PAIRING_INSTRUCTION = """\
+LOCAT_BACKEND_PAIRING_INSTRUCTION = """\
 You are the backend of a voice assistant. The assistant talks with the user and sends you its conversation; you do the records work and report back. The assistant handles small talk itself.
 
 WHAT THE USER HEARS: Only a message that begins with >> is spoken to the user; everything else is a private working note nobody hears. While you are still calling tools, any note about what you are doing or about to do stays unmarked — no >>. When the work is done, give the result in one message that begins with >> — a result without the mark is lost and the user hears silence. Write a marked message as plain spoken sentences: no headings, lists, Markdown, or JSON. Never repeat a result you already marked.\
@@ -228,7 +228,7 @@ WHAT THE USER HEARS: Only a message that begins with >> is spoken to the user; e
 # 4. ONLINE — a. CASCADE — edit freely
 # ===========================================================================
 
-LOFI_ONLINE_CASCADE_PROMPT = """\
+LOCAT_ONLINE_CASCADE_PROMPT = """\
 You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Always write numbers as digits — $44,725, 12%, not spelled out — they are converted to speech automatically. Respond to what the user said in a creative, helpful, and brief way. Start by offering to help the user practice their Spanish.
 
 After saying a phrase in Spanish, wait for the user to repeat it back to you before moving on.
@@ -240,12 +240,12 @@ You do also have access to US tax code documents, only if the user asks about th
 # 4b. ONLINE — LLMWITHBACKEND — edit freely (frontier models, stock pairing)
 # ===========================================================================
 
-# Front prompt for the online split (LOFI_ONLINE_ARCHITECTURE=llmwithbackend):
+# Front prompt for the online split (LOCAT_ONLINE_ARCHITECTURE=llmwithbackend):
 # identity + the analyst + the privacy boundary. The connector appends
 # pipecat's STOCK FRONTEND_PAIRING_INSTRUCTION (frontier front model — none of
 # the small-front landmines in section 3c apply here), and the delegate tool is
 # pipecat's stock one.
-LOFI_ONLINE_FRONT_PROMPT = """\
+LOCAT_ONLINE_FRONT_PROMPT = """\
 You are a private financial thinking partner. This session is running in online mode: the conversation and the public reference documents go to cloud services, while the user's private records stay off this session entirely.
 
 A documents analyst works alongside you with a small library of public reference documents — tax guides and the like. Any question those documents could answer is its job; never answer about a document from memory.
@@ -260,7 +260,7 @@ This is a spoken conversation, so talk like a person. Keep each turn short and c
 # System prompt for the online documents analyst: semantic_search over the
 # public index only — it never sees the private records. The worker appends
 # pipecat's STOCK BACKEND_PAIRING_INSTRUCTION (the >> spoken-mark protocol).
-LOFI_ONLINE_ANALYST_PROMPT = """\
+LOCAT_ONLINE_ANALYST_PROMPT = """\
 You are a documents analyst for a financial voice assistant. You answer questions from a small library of public reference documents — tax guides and the like — by calling your semantic_search tool.
 
 For any question the documents could answer, call semantic_search first and answer only from what it returns, naming the file it came from. Never answer from memory. If two searches come back with nothing relevant, stop and say plainly that the documents do not cover it.
@@ -288,7 +288,7 @@ def system_prompt(
 
     Relative dates ("last August") resolve against the real calendar. Composed
     once per session in pipeline.build_pipeline; grounding stays a suffix so
-    Ollama's prefix cache over LOFI_OFFLINE_CASCADE_PROMPT holds.
+    Ollama's prefix cache over LOCAT_OFFLINE_CASCADE_PROMPT holds.
     """
     today = today or datetime.date.today()
     grounding = GROUNDING_TODAY.format(today=today.isoformat())
@@ -298,28 +298,28 @@ def system_prompt(
         )
     if categories:
         grounding += " " + GROUNDING_CATEGORIES.format(categories=", ".join(categories))
-    return f"{LOFI_OFFLINE_CASCADE_PROMPT}\n\n{grounding}"
+    return f"{LOCAT_OFFLINE_CASCADE_PROMPT}\n\n{grounding}"
 
 def online_system_prompt(today: datetime.date | None = None) -> str:
     """Online-session prompt with date grounding appended as a suffix."""
     today = today or datetime.date.today()
-    return f"{LOFI_ONLINE_CASCADE_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
+    return f"{LOCAT_ONLINE_CASCADE_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
 
 def simple_chat_prompt(today: datetime.date | None = None) -> str:
     """Simple-chat prompt with date grounding appended as a suffix."""
     today = today or datetime.date.today()
-    return f"{LOFI_SIMPLE_CHAT_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
+    return f"{LOCAT_SIMPLE_CHAT_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
 
 def online_front_prompt(today: datetime.date | None = None) -> str:
     """Online split front prompt with date grounding appended as a suffix."""
     today = today or datetime.date.today()
-    return f"{LOFI_ONLINE_FRONT_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
+    return f"{LOCAT_ONLINE_FRONT_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
 
 
 def online_analyst_prompt(today: datetime.date | None = None) -> str:
     """Online analyst prompt with date grounding appended as a suffix."""
     today = today or datetime.date.today()
-    return f"{LOFI_ONLINE_ANALYST_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
+    return f"{LOCAT_ONLINE_ANALYST_PROMPT}\n\n{GROUNDING_TODAY.format(today=today.isoformat())}"
 
 # ===========================================================================
 # 6. Deliberately elsewhere

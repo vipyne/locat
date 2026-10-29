@@ -84,9 +84,9 @@ def inventory_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "MODELS_DIR", store)
     monkeypatch.setenv("HF_HOME", str(store / "huggingface"))
     monkeypatch.setenv("OLLAMA_MODELS", str(store / "ollama"))
-    monkeypatch.setenv("LOFI_KOKORO_MODEL_PATH", str(store / "kokoro" / "kokoro-v1.0.onnx"))
-    monkeypatch.setenv("LOFI_KOKORO_VOICES_PATH", str(store / "kokoro" / "voices-v1.0.bin"))
-    monkeypatch.setenv("LOFI_PIPER_DOWNLOAD_DIR", str(store / "piper"))
+    monkeypatch.setenv("LOCAT_KOKORO_MODEL_PATH", str(store / "kokoro" / "kokoro-v1.0.onnx"))
+    monkeypatch.setenv("LOCAT_KOKORO_VOICES_PATH", str(store / "kokoro" / "voices-v1.0.bin"))
+    monkeypatch.setenv("LOCAT_PIPER_DOWNLOAD_DIR", str(store / "piper"))
     monkeypatch.setattr(print_models, "_home_hf_hub", lambda: tmp_path / "home-hf" / "hub")
     monkeypatch.setattr(print_models, "_home_ollama_store", lambda: tmp_path / "home-ollama")
     return store
@@ -151,7 +151,7 @@ def test_downloaded_output_names_outside_flag_once(tmp_path, monkeypatch, capsys
     _print_downloaded()
     out = capsys.readouterr().out
 
-    assert out.count("outside LOFI_MODEL_DIR") == 1
+    assert out.count("outside LOCAT_MODEL_DIR") == 1
     outside_rows = [l for l in out.splitlines() if "home-model" in l]
     assert len(outside_rows) == 2
     for row in outside_rows:
@@ -169,7 +169,7 @@ def test_downloaded_output_no_legend_when_all_inside(tmp_path, monkeypatch, caps
     _print_downloaded()
     out = capsys.readouterr().out
 
-    assert "outside LOFI_MODEL_DIR" not in out
+    assert "outside LOCAT_MODEL_DIR" not in out
     assert "⚠️" not in out
 
 
@@ -206,7 +206,7 @@ def test_model_entries_lists_the_roles(monkeypatch):
 def test_model_entries_add_analyst_row_for_split(monkeypatch):
     from scripts import print_models
 
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
     entries = print_models.model_entries()
     by_role = {e["role"]: e for e in entries}
@@ -216,7 +216,7 @@ def test_model_entries_add_analyst_row_for_split(monkeypatch):
 def test_model_entries_llm_row_uses_cascade_model(monkeypatch):
     from scripts import print_models
 
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
     monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
     entries = print_models.model_entries()
     by_role = {e["role"]: e for e in entries}
@@ -227,7 +227,7 @@ def test_model_entries_llm_row_uses_cascade_model(monkeypatch):
 def test_model_entries_simple_chat_omits_embed_and_analyst(monkeypatch):
     from scripts import print_models
 
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade-simple-chat")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
     monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
     entries = print_models.model_entries()
     roles = [e["role"] for e in entries]

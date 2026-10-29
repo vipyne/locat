@@ -24,8 +24,8 @@ def _add_snapshot(hub, *filenames, dangling=False):
 def hubs(monkeypatch, tmp_path):
     store_hub = tmp_path / "store" / "hub"
     store_hub.mkdir(parents=True)
-    monkeypatch.setenv("LOFI_STT_ENGINE", "whisper_mlx")
-    monkeypatch.setenv("LOFI_WHISPER_MODEL", "LARGE_V3_TURBO")
+    monkeypatch.setenv("LOCAT_STT_ENGINE", "whisper_mlx")
+    monkeypatch.setenv("LOCAT_WHISPER_MODEL", "LARGE_V3_TURBO")
     monkeypatch.setenv("HF_HOME", str(store_hub.parent))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "external-cache"))
     return store_hub, tmp_path / "external-cache" / "huggingface" / "hub"
@@ -71,7 +71,7 @@ def test_dangling_weight_symlink_exits(hubs):
 
 
 def test_moonshine_engine_is_skipped(hubs, monkeypatch):
-    monkeypatch.setenv("LOFI_STT_ENGINE", "moonshine")
+    monkeypatch.setenv("LOCAT_STT_ENGINE", "moonshine")
     bot._preflight_stt()
 
 

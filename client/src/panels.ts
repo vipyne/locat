@@ -1,11 +1,11 @@
 import { RTVIEvent, type PipecatClient } from "@pipecat-ai/client-js";
 
-export const CONFIG_MESSAGE_TYPE = "lofi-config";
-export const RAG_MESSAGE_TYPE = "lofi-rag";
-export const RAG_PENDING_MESSAGE_TYPE = "lofi-rag-pending";
-export const MODE_MESSAGE_TYPE = "lofi-mode";
-const BUSY_MESSAGE_TYPE = "lofi-busy";
-const IDLE_MESSAGE_TYPE = "lofi-idle";
+export const CONFIG_MESSAGE_TYPE = "locat-config";
+export const RAG_MESSAGE_TYPE = "locat-rag";
+export const RAG_PENDING_MESSAGE_TYPE = "locat-rag-pending";
+export const MODE_MESSAGE_TYPE = "locat-mode";
+const BUSY_MESSAGE_TYPE = "locat-busy";
+const IDLE_MESSAGE_TYPE = "locat-idle";
 
 interface ModelEntry {
   role: string;
@@ -18,19 +18,19 @@ interface ModelEntry {
 // how to get them instead of printing a path that isn't there.
 const PREFETCH_CMD = "uv run python scripts/prefetch_models.py";
 
-interface LofiConfig {
+interface LocatConfig {
   type: string;
   models: ModelEntry[];
   ollama_host: string;
-  ollama_started_by_lofi: boolean;
+  ollama_started_by_locat: boolean;
   rag: string;
   architecture?: string;
   mode?: string;
 }
 
 const OWNERSHIP = {
-  lofi: "started by lofi (./lofi.sh stop stops it)",
-  foreign: "NOT started by lofi (your own instance; ./lofi.sh stop leaves it alone)",
+  locat: "started by locat (./locat.sh stop stops it)",
+  foreign: "NOT started by locat (your own instance; ./locat.sh stop leaves it alone)",
 };
 
 interface RagChunk {
@@ -46,7 +46,7 @@ interface RagRoute {
   elapsed_ms: number;
 }
 
-interface LofiRag {
+interface LocatRag {
   type: string;
   tool: string;
   args: Record<string, unknown>;
@@ -64,7 +64,7 @@ function routeLine(route: RagRoute): string {
   return `${route.tool} ${args} \u00b7 ${route.count} rows \u00b7 ${Math.round(route.elapsed_ms)}ms`;
 }
 
-interface LofiRagPending {
+interface LocatRagPending {
   type: string;
   tool: string;
   args: Record<string, unknown>;
@@ -73,7 +73,7 @@ interface LofiRagPending {
 
 // An analyst lookup runs 10-70s; show it in flight so silence doesn't read as
 // "nothing is happening". One call at a time, so one pending line.
-function renderPending(panel: HTMLElement, message: LofiRagPending): void {
+function renderPending(panel: HTMLElement, message: LocatRagPending): void {
   clearPending(panel);
   if (!message.active) return;
   const turn = document.createElement("div");
@@ -92,9 +92,9 @@ function clearPending(panel: HTMLElement): void {
 
 export function attachRagPanel(client: PipecatClient, panel: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
-    const message = data as Partial<LofiRag> | null;
+    const message = data as Partial<LocatRag> | null;
     if (message?.type === RAG_PENDING_MESSAGE_TYPE) {
-      renderPending(panel, message as unknown as LofiRagPending);
+      renderPending(panel, message as unknown as LocatRagPending);
       return;
     }
     if (message?.type !== RAG_MESSAGE_TYPE) return;
@@ -134,7 +134,7 @@ const ROLE_CLASSES: Record<string, string> = {
 
 export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
-    const message = data as Partial<LofiConfig> | null;
+    const message = data as Partial<LocatConfig> | null;
     if (message?.type !== CONFIG_MESSAGE_TYPE) return;
     panel.replaceChildren();
     const append = (text: string, className?: string) => {
@@ -164,7 +164,7 @@ export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): vo
     append(
       [
         `OLLAMA ${message.ollama_host}`,
-        `       ${message.ollama_started_by_lofi ? OWNERSHIP.lofi : OWNERSHIP.foreign}`,
+        `       ${message.ollama_started_by_locat ? OWNERSHIP.locat : OWNERSHIP.foreign}`,
         `ARCH   ${message.architecture ?? "cascade"}`,
         `RAG    ${message.rag}`,
       ].join("\n"),
@@ -172,11 +172,11 @@ export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): vo
   });
 }
 
-// lofi-config names the session's resolved mode (Task 7) — the banner
+// locat-config names the session's resolved mode (Task 7) — the banner
 // reflects what the server confirmed, not what the client requested.
 export function attachOnlineBanner(client: PipecatClient, banner: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
-    const message = data as Partial<LofiConfig> | null;
+    const message = data as Partial<LocatConfig> | null;
     if (message?.type !== CONFIG_MESSAGE_TYPE) return;
     const online = message.mode === "online";
     banner.hidden = !online;
@@ -190,7 +190,7 @@ export function attachOnlineBanner(client: PipecatClient, banner: HTMLElement): 
   });
 }
 
-interface LofiMode {
+interface LocatMode {
   type: string;
   mode: "fast" | "accurate";
   analyst_model: string;
@@ -200,10 +200,10 @@ interface LofiMode {
 const MODE_LABELS = { fast: "⚡ fast", accurate: "\u{1F9E0} accurate" };
 
 // Toggle the analyst between accurate (thinking) and fast (no-think). Hidden
-// until a lofi-config message says the bot runs the observer architecture;
+// until a locat-config message says the bot runs the observer architecture;
 // button state renders only from the server's confirmation.
 export function attachModeToggle(client: PipecatClient, button: HTMLButtonElement): void {
-  let mode: LofiMode["mode"] = "accurate";
+  let mode: LocatMode["mode"] = "accurate";
   button.textContent = MODE_LABELS[mode];
 
   button.addEventListener("click", () => {
@@ -212,7 +212,7 @@ export function attachModeToggle(client: PipecatClient, button: HTMLButtonElemen
   });
 
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
-    const message = data as Partial<LofiMode> & Partial<LofiConfig>;
+    const message = data as Partial<LocatMode> & Partial<LocatConfig>;
     if (message?.type === CONFIG_MESSAGE_TYPE) {
       button.hidden = message.architecture !== "observer";
       return;
@@ -226,7 +226,7 @@ export function attachModeToggle(client: PipecatClient, button: HTMLButtonElemen
 
 // Live stopwatch while a records lookup is in flight; freezes the final time
 // so the audience sees what the analyst cost. Same lifecycle as the money
-// rain: lofi-busy starts it, lofi-rag / lofi-idle stop it.
+// rain: locat-busy starts it, locat-rag / locat-idle stop it.
 export function attachStopwatch(client: PipecatClient, el: HTMLElement): void {
   let interval: number | undefined;
   let startedAt = 0;

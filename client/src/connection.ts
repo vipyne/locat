@@ -53,7 +53,7 @@ export function preloadDailyCallMachine(transportName: TransportName): Promise<v
       },
     });
   return callObject.load().catch((error: unknown) => {
-    console.warn("[lofi] daily call-machine preload failed:", error);
+    console.warn("[locat] daily call-machine preload failed:", error);
   });
 }
 

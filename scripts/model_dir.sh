@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# model_dir.sh — resolve LOFI_MODEL_DIR and export every model-store variable.
+# model_dir.sh — resolve LOCAT_MODEL_DIR and export every model-store variable.
 #
 # SOURCE this, don't execute it:
 #
-#     LOFI_REPO_ROOT="$REPO"; . "$REPO/scripts/model_dir.sh"
+#     LOCAT_REPO_ROOT="$REPO"; . "$REPO/scripts/model_dir.sh"
 #
 # One directory holds every model this project downloads, and it can live
 # anywhere on the machine:
 #
-#     $LOFI_MODEL_DIR/
+#     $LOCAT_MODEL_DIR/
 #     ├── huggingface/   HF_HOME            (Whisper-MLX, faster-whisper, Moonshine)
 #     ├── kokoro/        KOKORO_*_PATH      (Kokoro TTS)
-#     ├── piper/         LOFI_PIPER_DOWNLOAD_DIR (Piper TTS voices)
+#     ├── piper/         LOCAT_PIPER_DOWNLOAD_DIR (Piper TTS voices)
 #     └── ollama/        OLLAMA_MODELS      (the LLM)
 #
 # config.py resolves the same variable identically for the Python side; this
@@ -23,14 +23,14 @@
 # leading ~ is expanded.
 #
 # Every derived variable uses :- so an explicitly-set HF_HOME / OLLAMA_MODELS /
-# etc. still wins over the LOFI_MODEL_DIR default.
+# etc. still wins over the LOCAT_MODEL_DIR default.
 
 # Collapse "", "." and ".." segments in an absolute path, textually. Matches
 # Python's os.path.normpath, which config.py uses — deliberately NOT `pwd -P` or
 # realpath: those resolve symlinks (so /tmp/x would come back as /private/tmp/x
 # on macOS) and only work on paths that already exist. Staying lexical keeps the
 # two resolvers in agreement and echoes back the path the user actually typed.
-lofi__normpath() {
+locat__normpath() {
   local path="$1" seg out="" old_ifs="$IFS" reset_glob=""
   # `for seg in $path` is an unquoted expansion: disable globbing so a literal
   # * in a directory name cannot expand against the cwd.
@@ -49,8 +49,8 @@ lofi__normpath() {
   printf '%s\n' "${out:-/}"
 }
 
-lofi_resolve_model_dir() {  # $1 = repo root
-  local repo="$1" raw="${LOFI_MODEL_DIR:-}"
+locat_resolve_model_dir() {  # $1 = repo root
+  local repo="$1" raw="${LOCAT_MODEL_DIR:-}"
   [[ -z "$raw" ]] && raw="./models"
 
   # bash expands ~ only in literals, never in a variable's value — do it here.
@@ -67,13 +67,13 @@ lofi_resolve_model_dir() {  # $1 = repo root
   esac
 
   # Never creates anything — callers decide when to mkdir.
-  lofi__normpath "$raw"
+  locat__normpath "$raw"
 }
 
-LOFI_MODEL_DIR="$(lofi_resolve_model_dir "${LOFI_REPO_ROOT:-$PWD}")"
-export LOFI_MODEL_DIR
-export HF_HOME="${HF_HOME:-${LOFI_MODEL_DIR}/huggingface}"
-export OLLAMA_MODELS="${OLLAMA_MODELS:-${LOFI_MODEL_DIR}/ollama}"
-export LOFI_PIPER_DOWNLOAD_DIR="${LOFI_PIPER_DOWNLOAD_DIR:-${LOFI_MODEL_DIR}/piper}"
-export LOFI_KOKORO_MODEL_PATH="${LOFI_KOKORO_MODEL_PATH:-${LOFI_MODEL_DIR}/kokoro/kokoro-v1.0.onnx}"
-export LOFI_KOKORO_VOICES_PATH="${LOFI_KOKORO_VOICES_PATH:-${LOFI_MODEL_DIR}/kokoro/voices-v1.0.bin}"
+LOCAT_MODEL_DIR="$(locat_resolve_model_dir "${LOCAT_REPO_ROOT:-$PWD}")"
+export LOCAT_MODEL_DIR
+export HF_HOME="${HF_HOME:-${LOCAT_MODEL_DIR}/huggingface}"
+export OLLAMA_MODELS="${OLLAMA_MODELS:-${LOCAT_MODEL_DIR}/ollama}"
+export LOCAT_PIPER_DOWNLOAD_DIR="${LOCAT_PIPER_DOWNLOAD_DIR:-${LOCAT_MODEL_DIR}/piper}"
+export LOCAT_KOKORO_MODEL_PATH="${LOCAT_KOKORO_MODEL_PATH:-${LOCAT_MODEL_DIR}/kokoro/kokoro-v1.0.onnx}"
+export LOCAT_KOKORO_VOICES_PATH="${LOCAT_KOKORO_VOICES_PATH:-${LOCAT_MODEL_DIR}/kokoro/voices-v1.0.bin}"

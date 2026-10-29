@@ -264,7 +264,7 @@ def test_extract_csv_html_entities_unescaped():
 
 
 def test_ingest_populates_rows_and_csv_row_chunks(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     stats = ingest(make_data_dir(tmp_path), db_path, FakeEmbedder())
 
     conn = store.connect(db_path)
@@ -281,7 +281,7 @@ def test_ingest_populates_rows_and_csv_row_chunks(tmp_path):
 
 
 def test_ingest_builds_rollups_excluding_transfer(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest(make_data_dir(tmp_path), db_path, FakeEmbedder())
 
     conn = store.connect(db_path)
@@ -295,7 +295,7 @@ def test_ingest_builds_rollups_excluding_transfer(tmp_path):
 
 
 def test_ingest_records_embed_dim_in_meta(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest(make_data_dir(tmp_path), db_path, FakeEmbedder())
 
     conn = store.connect(db_path)
@@ -306,7 +306,7 @@ def test_ingest_records_embed_dim_in_meta(tmp_path):
 
 
 def test_ingest_vec_roundtrip_returns_exact_text_chunk_first(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     embedder = FakeEmbedder()
     ingest(make_data_dir(tmp_path), db_path, embedder)
 
@@ -325,7 +325,7 @@ def test_ingest_vec_roundtrip_returns_exact_text_chunk_first(tmp_path):
 
 
 def test_ingest_second_run_on_unchanged_files_embeds_nothing(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     data_dir = make_data_dir(tmp_path, with_note=True)
     counting = CountingEmbedder(FakeEmbedder())
 
@@ -338,7 +338,7 @@ def test_ingest_second_run_on_unchanged_files_embeds_nothing(tmp_path):
 
 
 def test_ingest_touched_file_reembeds_only_that_file(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     data_dir = make_data_dir(tmp_path, with_note=True)
     embedder = FakeEmbedder()
 
@@ -359,7 +359,7 @@ def test_ingest_touched_file_reembeds_only_that_file(tmp_path):
 
 
 def test_ingest_deleted_file_purges_its_rows_and_chunks(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     data_dir = make_data_dir(tmp_path, with_note=True)
     note_source = str((data_dir / "note.txt").resolve())
 
@@ -383,7 +383,7 @@ def test_ingest_deleted_file_purges_its_rows_and_chunks(tmp_path):
 
 
 def test_ingest_embed_model_mismatch_triggers_full_rebuild(tmp_path):
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     data_dir = make_data_dir(tmp_path)
 
     ingest(data_dir, db_path, FakeEmbedder())
@@ -442,8 +442,8 @@ def test_index_params_build_separate_dbs(tmp_path, monkeypatch):
     import ingest as ingest_mod
 
     private, public = make_split_data_dirs(tmp_path)
-    private_db = tmp_path / "lofi.db"
-    public_db = tmp_path / "lofi-public.db"
+    private_db = tmp_path / "locat.db"
+    public_db = tmp_path / "locat-public.db"
     monkeypatch.setattr(ingest_mod, "_build_embedder", lambda name: FakeEmbedder())
 
     ingest_mod._cli_index(data_dir=tmp_path / "data", db=private_db)
@@ -493,8 +493,8 @@ def test_public_build_failure_leaves_private_db(tmp_path, monkeypatch):
     import ingest as ingest_mod
 
     private, public = make_split_data_dirs(tmp_path)
-    private_db = tmp_path / "lofi.db"
-    public_db = tmp_path / "lofi-public.db"
+    private_db = tmp_path / "locat.db"
+    public_db = tmp_path / "locat-public.db"
     monkeypatch.setattr(ingest_mod, "_build_embedder", lambda name: FakeEmbedder())
     ingest_mod._cli_index(data_dir=tmp_path / "data", db=private_db)
     before = chunk_texts(private_db)
@@ -525,8 +525,8 @@ def test_openai_build_refuses_the_private_db(tmp_path, monkeypatch):
     import ingest as ingest_mod
 
     _private, public = make_split_data_dirs(tmp_path)
-    private_db = tmp_path / "lofi.db"
-    monkeypatch.setenv("LOFI_RAG_DB", str(private_db))
+    private_db = tmp_path / "locat.db"
+    monkeypatch.setenv("LOCAT_RAG_DB", str(private_db))
     monkeypatch.setattr(ingest_mod, "_build_embedder", lambda name: FakeEmbedder())
     assert config.rag_db_path() == str(private_db)
 
@@ -540,19 +540,19 @@ def test_openai_build_refuses_the_private_db(tmp_path, monkeypatch):
 def test_public_config_paths_default_under_the_index_dir(tmp_path, monkeypatch):
     import config
 
-    monkeypatch.setenv("LOFI_RAG_INDEX_DIR", str(tmp_path / "idx"))
-    monkeypatch.setenv("LOFI_RAG_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.delenv("LOFI_PUBLIC_RAG_DB", raising=False)
-    monkeypatch.delenv("LOFI_PUBLIC_RAG_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCAT_RAG_INDEX_DIR", str(tmp_path / "idx"))
+    monkeypatch.setenv("LOCAT_RAG_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("LOCAT_PUBLIC_RAG_DB", raising=False)
+    monkeypatch.delenv("LOCAT_PUBLIC_RAG_DATA_DIR", raising=False)
 
-    assert config.public_rag_db_path() == str(tmp_path / "idx" / "lofi-public.db")
+    assert config.public_rag_db_path() == str(tmp_path / "idx" / "locat-public.db")
     assert config.public_rag_data_dir() == str(tmp_path / "data" / "public")
     assert config.online_embed_model() == "text-embedding-3-small"
 
 
 def test_chunk_param_change_triggers_full_rebuild(tmp_path):
     data_dir = make_data_dir(tmp_path, with_note=True)
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest(data_dir, db_path, FakeEmbedder(), chunk_tokens=500, overlap=50)
 
     counting = CountingEmbedder(FakeEmbedder())
@@ -569,7 +569,7 @@ def test_chunk_param_change_triggers_full_rebuild(tmp_path):
 
 def test_same_chunk_params_keep_incremental_skip(tmp_path):
     data_dir = make_data_dir(tmp_path, with_note=True)
-    db_path = tmp_path / "lofi.db"
+    db_path = tmp_path / "locat.db"
     ingest(data_dir, db_path, FakeEmbedder(), chunk_tokens=500, overlap=50)
 
     counting = CountingEmbedder(FakeEmbedder())

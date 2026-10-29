@@ -3,7 +3,7 @@ import sys
 
 import config
 import scripts.print_models as print_models
-from bot_browser import CONFIG_MESSAGE_TYPE, _lofi_config_message, build_transport_params
+from bot_browser import CONFIG_MESSAGE_TYPE, _locat_config_message, build_transport_params
 
 
 def test_transport_params_offer_websocket_and_webrtc():
@@ -22,19 +22,19 @@ def test_webrtc_transport_omitted_without_aiortc(monkeypatch):
 
 
 def test_split_architecture_adds_analyst_row(monkeypatch):
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
-    monkeypatch.setenv("LOFI_RAG_LLM_MODEL", "nemotron-3-nano:4b")
-    message = _lofi_config_message()
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "nemotron-3-nano:4b")
+    message = _locat_config_message()
     roles = [m["role"] for m in message["models"]]
     assert roles == ["STT", "LLM", "ANALYST", "TTS", "EMBED"]
     analyst = message["models"][roles.index("ANALYST")]
     assert "nemotron-3-nano:4b" in analyst["model"]
 
 
-def test_lofi_config_message_shape():
-    message = _lofi_config_message()
+def test_locat_config_message_shape():
+    message = _locat_config_message()
     json.dumps(message)
-    assert message["type"] == CONFIG_MESSAGE_TYPE == "lofi-config"
+    assert message["type"] == CONFIG_MESSAGE_TYPE == "locat-config"
     assert message["mode"] == "offline"
     # Default architecture is split — the analyst backend gets its own row.
     assert [m["role"] for m in message["models"]] == [
@@ -48,19 +48,19 @@ def test_lofi_config_message_shape():
         assert entry["model"]
         assert entry["path"].lstrip().startswith("→")
     assert message["ollama_host"].startswith("http")
-    assert isinstance(message["ollama_started_by_lofi"], bool)
+    assert isinstance(message["ollama_started_by_locat"], bool)
     assert message["rag"].startswith(("index:", "no index"))
 
 
 def test_config_message_carries_mode():
-    assert _lofi_config_message("offline")["mode"] == "offline"
-    assert _lofi_config_message("online")["mode"] == "online"
+    assert _locat_config_message("offline")["mode"] == "offline"
+    assert _locat_config_message("online")["mode"] == "online"
 
 
 def test_online_model_entries_roles(monkeypatch):
     for key in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY"):
         monkeypatch.setenv(key, f"fake-{key}")
-    message = _lofi_config_message("online")
+    message = _locat_config_message("online")
     roles = [m["role"] for m in message["models"]]
     assert roles == ["STT", "LLM", "TTS", "EMBED"]
     dumped = json.dumps(message)
@@ -72,7 +72,7 @@ def test_online_model_entries_roles(monkeypatch):
 
 def test_model_entries_missing_flag(monkeypatch, tmp_path):
     """A role whose weights resolve to nothing is flagged for the panel."""
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
     weights = tmp_path / "weights.bin"
     weights.write_text("x")
     monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
@@ -89,18 +89,18 @@ def test_model_entries_missing_flag(monkeypatch, tmp_path):
 
 
 def test_architecture_accepts_simple_chat(monkeypatch):
-    """The third offline architecture is a valid LOFI_ARCHITECTURE value."""
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade-simple-chat")
+    """The third offline architecture is a valid LOCAT_ARCHITECTURE value."""
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
     assert config.architecture() == "cascade-simple-chat"
 
 
 def test_simple_chat_overrides_online_only(monkeypatch):
-    """Simple-chat is offline-only by nature, so it wins over LOFI_ONLINE_ONLY.
+    """Simple-chat is offline-only by nature, so it wins over LOCAT_ONLINE_ONLY.
 
-    A workshop machine's `.lofirc` can carry LOFI_ONLINE_ONLY=1; with
+    A workshop machine's `.locatrc` can carry LOCAT_ONLINE_ONLY=1; with
     simple-chat selected the process must still serve offline sessions.
     """
-    monkeypatch.setenv("LOFI_ONLINE_ONLY", "1")
-    monkeypatch.setenv("LOFI_ARCHITECTURE", "cascade-simple-chat")
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
     assert config.online_only() is False
     assert config.serve_mode() != "online-only"

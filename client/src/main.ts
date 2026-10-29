@@ -76,14 +76,14 @@ modeSelect.addEventListener("change", () => {
 
 document.querySelector<HTMLSpanElement>("#transport-name")!.textContent = transportName;
 
-// Serve mode from the bot (/api/lofi-mode): grey out the option an
+// Serve mode from the bot (/api/locat-mode): grey out the option an
 // --online-only / --offline-only process refuses and pre-select the one it
 // serves. Forcing the value fires the change handler, so the page reloads
 // once onto the right mode's transport.
 async function applyServeMode(): Promise<void> {
   let mode = "both";
   try {
-    const resp = await fetch("/api/lofi-mode");
+    const resp = await fetch("/api/locat-mode");
     mode = (await resp.json()).mode ?? "both";
   } catch {
     return;
@@ -111,7 +111,7 @@ function fallBackToNextTransport(): boolean {
   const next = FALLBACK_NEXT[transportName];
   if (!next) return false;
   try {
-    const key = `lofi-${transportName}-failed`;
+    const key = `locat-${transportName}-failed`;
     if (sessionStorage.getItem(key)) return false;
     sessionStorage.setItem(key, "1");
   } catch {
@@ -149,7 +149,7 @@ connectButton.addEventListener("click", async () => {
       await client.disconnect();
     }
   } catch (error) {
-    console.error("[lofi] connect failed:", error);
+    console.error("[locat] connect failed:", error);
     if (fallBackToNextTransport()) return;
     connectionState.textContent = `error: ${error instanceof Error ? error.message : error}`;
   } finally {

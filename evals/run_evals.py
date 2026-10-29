@@ -630,7 +630,7 @@ DELEGATE_SCHEMA = {
 # (pipeline.build_records_connector: respond_on_delegate off), so these
 # histories replay that shape.
 FOLLOWUP_HISTORY = [
-    {"role": "assistant", "content": tunables.LOFI_GREETING},
+    {"role": "assistant", "content": tunables.LOCAT_GREETING},
     {
         "role": "user",
         "content": "Can you tell me how many Whole Foods transactions I had in August of 2026?",
@@ -725,7 +725,7 @@ async def _followup_delegation(
                 "role": "system",
                 "content": tunables.SPLIT_FRONT_PROMPT
                 + "\n\n"
-                + tunables.LOFI_FRONTEND_PAIRING_INSTRUCTION,
+                + tunables.LOCAT_FRONTEND_PAIRING_INSTRUCTION,
             },
             *history,
             {"role": "user", "content": question},
@@ -925,7 +925,7 @@ async def _analyst_turn(
     import sqlite3
 
     messages = [
-        {"role": "system", "content": tunables.LOFI_BACKEND_PAIRING_INSTRUCTION},
+        {"role": "system", "content": tunables.LOCAT_BACKEND_PAIRING_INSTRUCTION},
         {"role": "system", "content": backend_system},
         *ANALYST_POISONED_CONTEXT,
     ]
