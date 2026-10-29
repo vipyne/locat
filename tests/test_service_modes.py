@@ -111,3 +111,228 @@ def test_missing_keys_empty_services_checks_nothing(monkeypatch):
 def test_missing_keys_unknown_service_exits(monkeypatch):
     with pytest.raises(SystemExit):
         config.missing_online_keys(services=("brain",))
+
+
+# --- modes.resolve_modes / validate_modes -------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def clean_serve_flags(monkeypatch):
+    for name in ("LOCAT_ONLINE_ONLY", "LOCAT_OFFLINE_ONLY", "LOCAT_ARCHITECTURE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_session_modes_is_a_frozen_dataclass():
+    import dataclasses
+
+    import modes
+
+    assert dataclasses.is_dataclass(modes.SessionModes)
+    fields = [f.name for f in dataclasses.fields(modes.SessionModes)]
+    assert fields == ["session", "stt", "llm", "tts"]
+    built = modes.SessionModes(session="offline", stt="offline", llm="offline", tts="offline")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        built.llm = "online"
+
+
+def test_mode_constants_live_in_modes():
+    import modes
+
+    assert modes.OFFLINE_MODE == "offline"
+    assert modes.ONLINE_MODE == "online"
+
+
+def test_pipeline_still_re_exports_the_constants():
+    """`from pipeline import OFFLINE_MODE` keeps working, modes.py owns them."""
+    import inspect
+
+    import pipeline
+
+    from modes import OFFLINE_MODE, ONLINE_MODE
+
+    assert pipeline.OFFLINE_MODE is OFFLINE_MODE
+    assert pipeline.ONLINE_MODE is ONLINE_MODE
+    source = inspect.getsource(pipeline)
+    assert 'ONLINE_MODE = "online"' not in source
+    assert 'OFFLINE_MODE = "offline"' not in source
+
+
+@pytest.mark.parametrize("session", ("offline", "online"))
+def test_unpinned_services_follow_the_session(session):
+    import modes
+
+    resolved = modes.resolve_modes(session)
+    assert (resolved.session, resolved.stt, resolved.llm, resolved.tts) == (
+        session,
+        session,
+        session,
+        session,
+    )
+
+
+@pytest.mark.parametrize("session", ("offline", "online"))
+@pytest.mark.parametrize("service,var", (("stt", "LOCAT_STT_MODE"), ("llm", "LOCAT_LLM_MODE"), ("tts", "LOCAT_TTS_MODE")))
+@pytest.mark.parametrize("pin", ("offline", "online"))
+def test_a_pin_beats_the_session(monkeypatch, session, service, var, pin):
+    import modes
+
+    monkeypatch.setenv(var, pin)
+    resolved = modes.resolve_modes(session)
+    assert getattr(resolved, service) == pin
+    for other in ("stt", "llm", "tts"):
+        if other != service:
+            assert getattr(resolved, other) == session
+
+
+@pytest.mark.parametrize("session", ("offline", "online"))
+def test_session_valued_pin_follows_the_session(monkeypatch, session):
+    import modes
+
+    monkeypatch.setenv("LOCAT_LLM_MODE", "session")
+    assert modes.resolve_modes(session).llm == session
+
+
+def test_unrecognized_session_falls_back_to_offline():
+    import modes
+
+    for raw in (None, "", "  ", "local", "both"):
+        assert modes.resolve_modes(raw).session == "offline"
+        assert modes.resolve_modes(raw).all_offline
+
+
+def test_mixed_audio_offline_brain_online():
+    import modes
+
+    resolved = modes.SessionModes(session="offline", stt="offline", llm="online", tts="offline")
+    assert resolved.any_online
+    assert not resolved.all_offline
+    assert resolved.online_services == ("llm",)
+    assert resolved.offline_services == ("stt", "tts")
+
+
+def test_all_offline_helpers():
+    import modes
+
+    resolved = modes.resolve_modes("offline")
+    assert resolved.all_offline
+    assert not resolved.any_online
+    assert resolved.online_services == ()
+    assert resolved.offline_services == ("stt", "llm", "tts")
+
+
+def test_all_online_helpers():
+    import modes
+
+    resolved = modes.resolve_modes("online")
+    assert resolved.any_online
+    assert not resolved.all_offline
+    assert resolved.online_services == ("stt", "llm", "tts")
+    assert resolved.offline_services == ()
+
+
+def test_simple_chat_forces_all_offline(monkeypatch):
+    import modes
+
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "online")
+    resolved = modes.resolve_modes("online")
+    assert resolved.all_offline
+    assert resolved.session == "offline"
+    modes.validate_modes(resolved)
+
+
+def test_validate_accepts_all_offline():
+    import modes
+
+    modes.validate_modes(modes.resolve_modes("offline"))
+
+
+def test_validate_accepts_all_online_with_keys():
+    import modes
+
+    modes.validate_modes(modes.resolve_modes("online"))
+
+
+@pytest.mark.parametrize("service,var", (("stt", "LOCAT_STT_MODE"), ("llm", "LOCAT_LLM_MODE"), ("tts", "LOCAT_TTS_MODE")))
+def test_online_only_refuses_an_offline_service(monkeypatch, service, var):
+    import modes
+
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv(var, "offline")
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("online"))
+    message = str(excinfo.value)
+    assert "--online-only" in message
+    assert service in message
+
+
+@pytest.mark.parametrize("service,var", (("stt", "LOCAT_STT_MODE"), ("llm", "LOCAT_LLM_MODE"), ("tts", "LOCAT_TTS_MODE")))
+def test_offline_only_refuses_an_online_service(monkeypatch, service, var):
+    import modes
+
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
+    monkeypatch.setenv(var, "online")
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("offline"))
+    message = str(excinfo.value)
+    assert "--offline-only" in message
+    assert service in message
+
+
+def test_offline_only_names_every_online_service_at_once(monkeypatch):
+    import modes
+
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_STT_MODE", "online")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "online")
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("offline"))
+    message = str(excinfo.value)
+    assert "stt" in message and "tts" in message
+
+
+def test_online_only_names_every_offline_service_at_once(monkeypatch):
+    import modes
+
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_STT_MODE", "offline")
+    monkeypatch.setenv("LOCAT_TTS_MODE", "offline")
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("online"))
+    message = str(excinfo.value)
+    assert "stt" in message and "tts" in message
+
+
+def test_validate_reports_only_keys_for_online_services(monkeypatch):
+    import modes
+
+    for name in config.ONLINE_KEY_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("offline"))
+    message = str(excinfo.value)
+    assert "OPENAI_API_KEY" in message
+    assert "DEEPGRAM_API_KEY" not in message
+    assert "CARTESIA_API_KEY" not in message
+
+
+def test_validate_reports_all_missing_keys_in_one_message(monkeypatch):
+    import modes
+
+    for name in config.ONLINE_KEY_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        modes.validate_modes(modes.resolve_modes("online"))
+    message = str(excinfo.value)
+    for name in config.ONLINE_KEY_NAMES:
+        assert name in message
+
+
+def test_validate_ignores_missing_keys_for_an_all_offline_session(monkeypatch):
+    import modes
+
+    for name in config.ONLINE_KEY_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    modes.validate_modes(modes.resolve_modes("offline"))

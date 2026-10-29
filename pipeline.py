@@ -42,6 +42,7 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.transports.base_transport import BaseTransport
 
 import ingest
+from modes import OFFLINE_MODE, ONLINE_MODE  # noqa: F401 (re-exported)
 import store
 import tools
 from rag_agent import grounded_question, strip_think
@@ -73,9 +74,6 @@ from tunables import (
     simple_chat_prompt,
     system_prompt,
 )
-
-ONLINE_MODE = "online"
-OFFLINE_MODE = "offline"
 
 
 @dataclass
