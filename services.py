@@ -14,6 +14,9 @@ Each builder reads its engine choice from config (``LOCAT_STT_ENGINE`` /
 Online sessions take the ``build_online_*`` builders instead — Deepgram STT,
 OpenAI LLM, Cartesia TTS, keyed from the three names in ``.env``.
 
+``stt_for(mode)`` / ``tts_for(mode)`` pick between the two sides per service,
+so a session can run local STT and TTS against a cloud LLM (see modes.py).
+
 Engine imports happen lazily inside each branch, so an engine's optional
 dependency (``uv sync --extra moonshine`` / ``--extra piper``) is only required
 if that engine is actually selected. Importing this module has no side effects
@@ -29,6 +32,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from modes import OFFLINE_MODE, ONLINE_MODE
 from scripts.consolidate import default_external_hf_hub
 from scripts.print_models import hf_weights_snapshot, stt_repo_id
 from spoken_text_filter import SpokenTextFilter
@@ -324,3 +328,26 @@ def build_tts():
         )
 
     sys.exit(f"\n✖ Unknown LOCAT_TTS_ENGINE '{engine}' — valid: kokoro (default), piper\n")
+
+
+def _mode_exit(service: str, mode: str) -> "None":
+    """Exit naming the bad mode value and the two that work."""
+    sys.exit(f"\n✖ Unknown {service} mode '{mode}' — valid: {OFFLINE_MODE}, {ONLINE_MODE}\n")
+
+
+def stt_for(mode: str):
+    """The speech-to-text service for ``mode`` — local engine or Deepgram."""
+    if mode == OFFLINE_MODE:
+        return build_stt()
+    if mode == ONLINE_MODE:
+        return build_online_stt()
+    _mode_exit("STT", mode)
+
+
+def tts_for(mode: str):
+    """The text-to-speech service for ``mode`` — local engine or Cartesia."""
+    if mode == OFFLINE_MODE:
+        return build_tts()
+    if mode == ONLINE_MODE:
+        return build_online_tts()
+    _mode_exit("TTS", mode)

@@ -97,3 +97,43 @@ def test_online_model_defaults(monkeypatch):
 
     monkeypatch.setenv("LOCAT_ONLINE_LLM_MODEL", "gpt-4.1-mini")
     assert config.online_llm_model() == "gpt-4.1-mini"
+
+
+# --- mode dispatch: online side -------------------------------------------
+
+
+def _boom(*_args, **_kwargs):
+    raise AssertionError("dispatch called the wrong builder")
+
+
+def test_stt_for_online_uses_deepgram_builder(monkeypatch):
+    """stt_for("online") routes to build_online_stt, never the local one."""
+    monkeypatch.setattr(services, "build_online_stt", lambda: "deepgram-stt")
+    monkeypatch.setattr(services, "build_stt", _boom)
+    assert services.stt_for("online") == "deepgram-stt"
+
+
+def test_tts_for_online_uses_cartesia_builder(monkeypatch):
+    """tts_for("online") routes to build_online_tts, never the local one."""
+    monkeypatch.setattr(services, "build_online_tts", lambda: "cartesia-tts")
+    monkeypatch.setattr(services, "build_tts", _boom)
+    assert services.tts_for("online") == "cartesia-tts"
+
+
+def test_online_dispatch_builds_real_cloud_services(fake_keys, no_ollama):
+    """The online branches construct the real Deepgram/Cartesia services."""
+    from pipecat.services.cartesia.tts import CartesiaTTSService
+    from pipecat.services.deepgram.stt import DeepgramSTTService
+
+    assert isinstance(services.stt_for("online"), DeepgramSTTService)
+    assert isinstance(services.tts_for("online"), CartesiaTTSService)
+
+
+@pytest.mark.parametrize("dispatch", ["stt_for", "tts_for"])
+def test_dispatch_rejects_unknown_mode(dispatch):
+    """An unknown mode exits naming the bad value and the two valid ones."""
+    with pytest.raises(SystemExit) as excinfo:
+        getattr(services, dispatch)("sideways")
+    message = str(excinfo.value)
+    assert "sideways" in message
+    assert "offline" in message and "online" in message
