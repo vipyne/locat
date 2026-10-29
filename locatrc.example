@@ -10,6 +10,12 @@ LOCAT_MODEL_DIR=./models
 #LOCAT_ONLINE_ONLY=0                          # 1 = serve online sessions only (./locat.sh start --online-only)
 #LOCAT_OFFLINE_ONLY=0                         # 1 = serve offline sessions only (./locat.sh start --offline-only); wins when both are set
 
+# Per-service pins: session (default) follows the connect request; offline/online pin that service.
+# Mix freely, e.g. local STT+TTS with a cloud brain. An online LLM reads only the public index.
+#LOCAT_STT_MODE=session                       # session | offline | online
+#LOCAT_LLM_MODE=session                       # session | offline | online; decides persona, architecture, RAG db
+#LOCAT_TTS_MODE=session                       # session | offline | online
+
 #LOCAT_LLM_MODEL=qwen2.5:7b
 #LOCAT_RAG_LLM_MODEL=qwen3:8b                 # records analyst backend; needs real API tool calls
 

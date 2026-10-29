@@ -60,6 +60,13 @@ DEFAULT_MODEL_DIR = "./models"
 SETTINGS_FILE_NAME = ".locatrc"
 KEYS_FILE_NAME = ".env"
 ONLINE_KEY_NAMES = ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY")
+# Which key each service needs to run online. OPENAI_API_KEY also buys the
+# public-index embedder, which only an online brain reaches.
+ONLINE_KEYS_BY_SERVICE = {
+    "stt": ("DEEPGRAM_API_KEY",),
+    "llm": ("OPENAI_API_KEY",),
+    "tts": ("CARTESIA_API_KEY",),
+}
 
 
 def _load_config_files(root: Path | None = None) -> None:
@@ -461,13 +468,71 @@ def online_tts_voice() -> str:
     return _get("LOCAT_ONLINE_TTS_VOICE", "86e30c1d-714b-4074-a1f2-1cb6b552fb49")
 
 
-def missing_online_keys() -> list[str]:
-    """Which of the three online-mode keys are unset or blank, in canonical order.
+SERVICE_MODES = ("offline", "online", "session")
 
-    Online mode needs all three; the connect path reports every missing one at
-    once so a session is not fixed one key per attempt.
+
+def _service_mode(name: str) -> str:
+    value = _get(name, "").strip().lower()
+    if not value:
+        return "session"
+    if value not in SERVICE_MODES:
+        raise SystemExit(
+            f"\n✖ Unknown {name} '{value}' — valid: session (default), offline, online\n"
+        )
+    return value
+
+
+def stt_mode() -> str:
+    """Speech-to-text pin (LOCAT_STT_MODE, default ``session``).
+
+    ``session`` follows whatever mode the connect request asks for; ``offline``
+    and ``online`` pin this service regardless.
     """
-    return [name for name in ONLINE_KEY_NAMES if not os.getenv(name, "").strip()]
+    return _service_mode("LOCAT_STT_MODE")
+
+
+def llm_mode() -> str:
+    """Brain pin (LOCAT_LLM_MODE, default ``session``).
+
+    The LLM mode decides persona, architecture, and which RAG db opens — an
+    online brain reads only the public index.
+    """
+    return _service_mode("LOCAT_LLM_MODE")
+
+
+def tts_mode() -> str:
+    """Text-to-speech pin (LOCAT_TTS_MODE, default ``session``).
+
+    ``session`` follows the connect request; ``offline`` and ``online`` pin
+    this service regardless.
+    """
+    return _service_mode("LOCAT_TTS_MODE")
+
+
+def missing_online_keys(services: tuple[str, ...] | None = None) -> list[str]:
+    """Which online-mode keys are unset or blank, in canonical order.
+
+    Defaults to all three services. Pass the services actually running online
+    so a mixed session is not asked for keys it never uses. The connect path
+    reports every missing one at once so a session is not fixed one key per
+    attempt.
+    """
+    if services is None:
+        wanted = set(ONLINE_KEY_NAMES)
+    else:
+        wanted = set()
+        for service in services:
+            if service not in ONLINE_KEYS_BY_SERVICE:
+                raise SystemExit(
+                    f"\n✖ Unknown service '{service}' — valid: "
+                    f"{', '.join(ONLINE_KEYS_BY_SERVICE)}\n"
+                )
+            wanted.update(ONLINE_KEYS_BY_SERVICE[service])
+    return [
+        name
+        for name in ONLINE_KEY_NAMES
+        if name in wanted and not os.getenv(name, "").strip()
+    ]
 
 
 def _truthy(name: str) -> bool:
