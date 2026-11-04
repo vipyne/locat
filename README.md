@@ -494,15 +494,26 @@ over the file, both unset means both modes are available, and when both vars
 are set offline-only wins. The page greys out the mode the process refuses
 and pre-selects the one it serves.
 
-#### Coming: one mode per service
+#### One mode per service
 
-Session mode is all-or-nothing today — one connect, one stack. Three knobs in
-progress split it per service: `LOCAT_STT_MODE`, `LOCAT_LLM_MODE` and
-`LOCAT_TTS_MODE`, each `offline` | `online` | `session` (the default — follow
-the session). So your speech can be transcribed locally by Whisper and spoken
-back by Kokoro while only the language model goes to the cloud. The privacy
-boundary does not move: an online language model opens the public index and
-nothing else, whatever the other two services are doing.
+Session mode picks a default for all three services, but each one can be
+pinned past that default in `.locatrc`:
+
+| Knob | Values | Pins |
+|---|---|---|
+| `LOCAT_STT_MODE` | `offline` \| `online` \| `session` (default) | speech-to-text |
+| `LOCAT_LLM_MODE` | `offline` \| `online` \| `session` (default) | the language model — also decides persona, architecture, which RAG db |
+| `LOCAT_TTS_MODE` | `offline` \| `online` \| `session` (default) | text-to-speech |
+
+Pin one and the other two keep following the session toggle; pin all three
+and the toggle on the page disables itself, with a note that the modes are
+pinned in `.locatrc`. So your speech can be transcribed locally by Whisper and
+spoken back by Kokoro while only the language model goes to the cloud — the
+What's Running panel shows a `MODES` chip row for all three, and the banner
+above the transcript names exactly what crosses the network. **The privacy
+boundary does not move:** an online language model opens the public index and
+nothing else, whatever the other two services are doing; a local language
+model still mounts the private index even when STT or TTS is online.
 
 ---
 
