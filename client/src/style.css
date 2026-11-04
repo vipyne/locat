@@ -61,6 +61,15 @@ button {
   cursor: pointer;
 }
 
+#mode-select:disabled {
+  cursor: not-allowed;
+}
+
+#mode-pinned {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
 .money {
   font-weight: 700;
   color: #15803d;
@@ -198,6 +207,23 @@ button {
 .cfg-embed { color: var(--cfg-embed); }
 /* A role with no weights on disk — the panel says so where its path would be. */
 .cfg-missing { color: var(--cfg-missing); font-weight: 600; }
+
+/* Per-service mode chips on the panel's MODES line. */
+.svc-chip {
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.svc-offline {
+  color: var(--cfg-analyst);
+  background: color-mix(in srgb, var(--cfg-analyst) 18%, transparent);
+}
+
+.svc-online {
+  color: var(--cfg-missing);
+  background: color-mix(in srgb, var(--cfg-missing) 18%, transparent);
+}
 
 #rag-panel {
   margin-top: 1rem;

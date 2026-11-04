@@ -21,6 +21,7 @@ import { attachTranscript } from "./transcript";
 
 const connectButton = document.querySelector<HTMLButtonElement>("#connect")!;
 const modeSelect = document.querySelector<HTMLSelectElement>("#mode-select")!;
+const modePinned = document.querySelector<HTMLSpanElement>("#mode-pinned")!;
 const muteButton = document.querySelector<HTMLButtonElement>("#mute")!;
 const connectionState = document.querySelector<HTMLSpanElement>("#connection-state")!;
 const transcriptPane = document.querySelector<HTMLElement>("#transcript")!;
@@ -37,6 +38,10 @@ const IDLE_STATES: TransportState[] = [
   "error",
 ];
 
+// Every service pinned in .locatrc: the toggle decides nothing, so it stays
+// disabled through every state change.
+let modesPinned = false;
+
 function render(state: TransportState): void {
   connectionState.textContent = state;
   const idle = IDLE_STATES.includes(state);
@@ -44,7 +49,7 @@ function render(state: TransportState): void {
   muteButton.disabled = idle;
   textInput.disabled = idle;
   sendButton.disabled = idle;
-  modeSelect.disabled = !idle;
+  modeSelect.disabled = !idle || modesPinned;
 }
 
 function sessionMode(): SessionMode {
@@ -76,18 +81,44 @@ modeSelect.addEventListener("change", () => {
 
 document.querySelector<HTMLSpanElement>("#transport-name")!.textContent = transportName;
 
+interface ServeModePayload {
+  mode?: string;
+  service_modes?: Record<string, string>;
+}
+
+const PINNABLE_SERVICES = ["stt", "llm", "tts"] as const;
+
+// Raw pins from .locatrc: each `session`, `offline` or `online`. A pinned
+// service ignores the toggle, so all three pinned means the toggle has
+// nothing left to decide — disable it and name the pins.
+function applyServicePins(pins: Record<string, string> | undefined): void {
+  if (!pins) return;
+  const pinned = PINNABLE_SERVICES.filter(
+    (service) => pins[service] === "offline" || pins[service] === "online",
+  );
+  if (pinned.length !== PINNABLE_SERVICES.length) return;
+  modesPinned = true;
+  modeSelect.disabled = true;
+  modePinned.hidden = false;
+  modePinned.textContent = `modes pinned in .locatrc — ${pinned
+    .map((service) => `${service} ${pins[service]}`)
+    .join(", ")}`;
+}
+
 // Serve mode from the bot (/api/locat-mode): grey out the option an
 // --online-only / --offline-only process refuses and pre-select the one it
 // serves. Forcing the value fires the change handler, so the page reloads
 // once onto the right mode's transport.
 async function applyServeMode(): Promise<void> {
-  let mode = "both";
+  let payload: ServeModePayload = {};
   try {
     const resp = await fetch("/api/locat-mode");
-    mode = (await resp.json()).mode ?? "both";
+    payload = await resp.json();
   } catch {
     return;
   }
+  applyServicePins(payload.service_modes);
+  const mode = payload.mode ?? "both";
   if (mode !== "online-only" && mode !== "offline-only") return;
   const forced = mode === "online-only" ? "online" : "offline";
   for (const option of modeSelect.options) {

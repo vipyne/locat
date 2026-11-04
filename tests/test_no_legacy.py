@@ -42,7 +42,7 @@ def test_no_legacy_references():
         path = REPO_ROOT / rel
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, ValueError):
+        except (FileNotFoundError, UnicodeDecodeError, ValueError):
             continue
         for label, pattern in PATTERNS:
             if pattern.search(text):

@@ -12,6 +12,7 @@ interface ModelEntry {
   model: string;
   path: string;
   missing?: boolean;
+  mode?: string;
 }
 
 // Server flags a role whose weights resolve to nothing; the path line says
@@ -26,6 +27,14 @@ interface LocatConfig {
   rag: string;
   architecture?: string;
   mode?: string;
+  service_modes?: Record<string, string>;
+}
+
+const ONLINE = "online";
+const SERVICE_ORDER = ["stt", "llm", "tts"] as const;
+
+function onlineServices(modes: Record<string, string>): string[] {
+  return SERVICE_ORDER.filter((service) => modes[service] === ONLINE);
 }
 
 const OWNERSHIP = {
@@ -147,6 +156,18 @@ export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): vo
       span.textContent = text;
       panel.append(span);
     };
+    // Per-service chips: a mixed session runs e.g. offline STT with an online
+    // LLM, which the model rows alone don't spell out.
+    const serviceModes = message.service_modes;
+    if (serviceModes) {
+      append("MODES   ");
+      for (const service of SERVICE_ORDER) {
+        const mode = serviceModes[service] ?? "offline";
+        append(` ${service} ${mode} `, `svc-chip svc-${mode}`);
+        append(" ");
+      }
+      append("\n");
+    }
     for (const entry of message.models ?? []) {
       // "qwen2.5:7b (Ollama @ …)" → role + name colored, detail plain.
       const detailAt = entry.model.indexOf(" (");
@@ -172,20 +193,68 @@ export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): vo
   });
 }
 
-// locat-config names the session's resolved mode (Task 7) — the banner
-// reflects what the server confirmed, not what the client requested.
+const PROVIDERS: Record<string, string> = {
+  stt: "Deepgram",
+  llm: "OpenAI",
+  tts: "Cartesia",
+};
+
+const ROLES: Record<string, string> = {
+  stt: "speech recognition",
+  llm: "the conversation",
+  tts: "the reply voice",
+};
+
+function joinWords(words: string[]): string {
+  if (words.length < 2) return words.join("");
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+// What a mixed session actually leaks: the brain's mode decides whether the
+// words cross, STT/TTS decide whether the audio does.
+function bannerDetail(modes: Record<string, string>): string {
+  const online = onlineServices(modes);
+  if (online.length === SERVICE_ORDER.length) {
+    return (
+      "conversation and retrieved public documents go to Deepgram, OpenAI, " +
+      "and Cartesia; the private records db is not mounted."
+    );
+  }
+  const words = modes.llm === ONLINE;
+  const audio = modes.stt === ONLINE || modes.tts === ONLINE;
+  let split = "your words stay local, but audio crosses the network";
+  if (words && audio) split = "both your audio and your words cross the network";
+  else if (words) split = "your audio stays on this machine, but your words cross the network";
+  const local = SERVICE_ORDER.filter((service) => modes[service] !== ONLINE);
+  return (
+    `${split} — ${joinWords(online.map((s) => PROVIDERS[s]))} ` +
+    `handle${online.length > 1 ? "" : "s"} ` +
+    `${joinWords(online.map((s) => ROLES[s]))}, ${joinWords(local.map((s) => ROLES[s]))} ` +
+    `stay${local.length > 1 ? "" : "s"} here.` +
+    (words ? " The private records db is not mounted." : "")
+  );
+}
+
+// locat-config names the session's resolved per-service modes — the banner
+// reflects what the server confirmed, not what the client requested. Any one
+// online service raises it; the wording names the audio/words split.
 export function attachOnlineBanner(client: PipecatClient, banner: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
     const message = data as Partial<LocatConfig> | null;
     if (message?.type !== CONFIG_MESSAGE_TYPE) return;
-    const online = message.mode === "online";
-    banner.hidden = !online;
-    if (!online) return;
-    banner.replaceChildren("⚠️ ONLINE MODE — ");
+    const modes = message.service_modes ?? {
+      stt: message.mode ?? "offline",
+      llm: message.mode ?? "offline",
+      tts: message.mode ?? "offline",
+    };
+    const online = onlineServices(modes);
+    banner.hidden = online.length === 0;
+    if (online.length === 0) return;
+    const allOnline = online.length === SERVICE_ORDER.length;
+    banner.replaceChildren(allOnline ? "⚠️ ONLINE MODE — " : "⚠️ MIXED MODE — ");
     const detail = document.createElement("span");
     detail.className = "online-detail";
-    detail.textContent =
-      "conversation and retrieved public documents go to Deepgram, OpenAI, and Cartesia; the private records db is not mounted.";
+    detail.textContent = bannerDetail(modes);
     banner.append(detail);
   });
 }
