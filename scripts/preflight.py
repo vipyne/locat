@@ -11,6 +11,9 @@ when the machine is ready. locat.sh reads the lines and points at the fix.
     key <NAME>        an online-session API key missing from .env
     rag / rag-public  a document index that has documents but no build
 
+``--online-services`` narrows the key and public-index checks to the services
+that can actually run online under the caller's mode pins.
+
 Usage:
     uv run python scripts/preflight.py --mode both --transport browser
 """
@@ -96,10 +99,11 @@ def missing_offline() -> list[str]:
     return lines
 
 
-def missing_online() -> list[str]:
-    lines = [f"key {name}" for name in config.missing_online_keys()]
+def missing_online(services: tuple[str, ...]) -> list[str]:
+    lines = [f"key {name}" for name in config.missing_online_keys(services=services)]
     if (
-        os.getenv("OPENAI_API_KEY", "").strip()
+        "llm" in services
+        and os.getenv("OPENAI_API_KEY", "").strip()
         and not store.has_index(Path(config.public_rag_db_path()))
         and _has_documents(config.public_rag_data_dir())
     ):
@@ -111,6 +115,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--mode", choices=("both", "offline-only", "online-only"), default="both")
     parser.add_argument("--transport", choices=("browser", "headphones"), default="browser")
+    parser.add_argument(
+        "--online-services",
+        default=",".join(config.ONLINE_KEYS_BY_SERVICE),
+        help="comma-separated services that may run online (default: all three)",
+    )
     args = parser.parse_args()
 
     offline = args.mode != "online-only"
@@ -121,8 +130,9 @@ def main() -> None:
     # Online sessions have the network: /daily/ falls back to the CDN.
     if offline and args.transport == "browser":
         lines += [f"daily {n}" for n in DAILY_BUNDLE_NAMES if not daily_bundle_path(n).is_file()]
-    if online:
-        lines += missing_online()
+    online_services = tuple(s for s in args.online_services.split(",") if s)
+    if online and online_services:
+        lines += missing_online(online_services)
     for line in lines:
         print(line)
 

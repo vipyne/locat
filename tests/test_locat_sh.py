@@ -514,3 +514,111 @@ def test_start_simple_chat_overrides_online_only(tmp_path):
         assert "start: simple-chat is offline — overriding online-only." in result.stdout
     finally:
         decoy.kill()
+
+
+def test_start_offline_only_refuses_an_online_llm_pin(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--offline-only"],
+        LOCAT_LLM_MODE="online",
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "--offline-only" in result.stderr
+    assert "LOCAT_LLM_MODE=online" in result.stderr
+    assert "not downloaded" not in out  # refused before preflight
+    assert not (tmp_path / "bot.pid").exists()
+
+
+def test_start_online_only_refuses_an_offline_stt_pin(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--online-only"],
+        LOCAT_STT_MODE="offline",
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "--online-only" in result.stderr
+    assert "LOCAT_STT_MODE=offline" in result.stderr
+    assert not (tmp_path / "bot.pid").exists()
+
+
+def test_start_refuses_an_unknown_service_mode(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_TTS_MODE="sometimes",
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "LOCAT_TTS_MODE" in result.stderr
+    assert "session" in result.stderr and "online" in result.stderr
+
+
+def test_start_keys_nag_skips_services_pinned_offline(tmp_path):
+    """Only a service that can still go online gets its key asked for."""
+    env = {
+        **isolated_store_env(tmp_path),
+        "OPENAI_API_KEY": "",
+        "DEEPGRAM_API_KEY": "",
+        "CARTESIA_API_KEY": "",
+        "LOCAT_WEB_PORT": str(closed_port()),
+        "LOCAT_STT_MODE": "offline",
+        "LOCAT_TTS_MODE": "offline",
+    }
+    result = run_locat("start", tmp_path / "state", f"127.0.0.1:{closed_port()}", **env)
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "OPENAI_API_KEY" in out  # the brain can still run online
+    assert "DEEPGRAM_API_KEY" not in out
+    assert "CARTESIA_API_KEY" not in out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_start_all_services_pinned_offline_asks_for_no_keys(tmp_path):
+    env = {
+        **isolated_store_env(tmp_path),
+        "OPENAI_API_KEY": "",
+        "DEEPGRAM_API_KEY": "",
+        "CARTESIA_API_KEY": "",
+        "LOCAT_WEB_PORT": str(closed_port()),
+        "LOCAT_STT_MODE": "offline",
+        "LOCAT_LLM_MODE": "offline",
+        "LOCAT_TTS_MODE": "offline",
+    }
+    result = run_locat("start", tmp_path / "state", f"127.0.0.1:{closed_port()}", **env)
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    for key in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY"):
+        assert key not in out, out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_status_prints_the_three_service_pins(tmp_path):
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 0
+    assert re.search(
+        r"^modes\s+stt session, llm session, tts session", result.stdout, re.M
+    ), result.stdout
+
+
+def test_status_prints_a_pinned_service_mode(tmp_path):
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", LOCAT_LLM_MODE="online")
+    assert result.returncode == 0
+    assert re.search(
+        r"^modes\s+stt session, llm online, tts session", result.stdout, re.M
+    ), result.stdout
+
+
+def test_per_command_help_documents_the_service_mode_pins(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    for var in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        assert var in result.stdout
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "LOCAT_LLM_MODE" in result.stdout

@@ -11,6 +11,7 @@
 #                                         # bring up Ollama if needed, then the bot (default: browser)
 #                                         # --online-only: cloud-only sessions, no Ollama, no local models
 #                                         # --offline-only: local sessions only; an online connect is refused
+#                                         # LOCAT_STT_MODE/LOCAT_LLM_MODE/LOCAT_TTS_MODE=offline|online pin one service
 #                                         # --cascade: STT, LLM, TTS bot architecture; has tool calls
 #                                         # --llmwithbackend: front LLM/analyst LLM bot architecture
 #                                         # --cascade-simple-chat: STT, LLM, TTS bot architecture; no tool calls
@@ -94,6 +95,55 @@ serve_mode() {
   fi
 }
 
+# cascade-simple-chat is local-only, so modes.resolve_modes() forces every
+# service offline there and the pins never apply.
+simple_chat() { [[ "${LOCAT_ARCHITECTURE:-llmwithbackend}" == "cascade-simple-chat" ]]; }
+
+# Normalized pin for one service — "session" (follow the connect), "offline"
+# or "online". Mirrors config._service_mode().
+pin_of() {
+  local var value
+  if simple_chat; then echo "offline"; return 0; fi
+  var="LOCAT_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')_MODE"
+  value="$(printf '%s' "${!var:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  echo "${value:-session}"
+}
+
+# Refuse an unknown pin value here, in the parent shell: pin_of runs inside a
+# command substitution and its exit would only leave the subshell.
+check_service_pins() {
+  local svc var
+  for svc in stt llm tts; do
+    var="LOCAT_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')_MODE"
+    case "$(pin_of "$svc")" in
+      session|offline|online) ;;
+      *) echo "locat: unknown $var '${!var}' — valid: session (default), offline, online" >&2
+         exit 1 ;;
+    esac
+  done
+}
+
+# Pins matching one mode, as "VAR=value" pairs for an error message.
+pins_matching() {
+  local svc var list=""
+  for svc in stt llm tts; do
+    var="LOCAT_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')_MODE"
+    if [[ "$(pin_of "$svc")" == "$1" ]]; then list="${list:+$list, }$var=$1"; fi
+  done
+  echo "$list"
+}
+
+# Services that could still run online under the current flags and pins — the
+# only ones whose cloud keys matter.
+online_capable_services() {
+  local svc list=""
+  if [[ "$1" == "offline-only" ]]; then echo ""; return 0; fi
+  for svc in stt llm tts; do
+    if [[ "$(pin_of "$svc")" != "offline" ]]; then list="${list:+$list,}$svc"; fi
+  done
+  echo "$list"
+}
+
 pid_alive()    { [[ -n "${1:-}" ]] && ps -p "$1" >/dev/null 2>&1; }
 recorded_pid() { cat "$STATE_DIR/$1.pid" 2>/dev/null || true; }
 
@@ -165,9 +215,10 @@ setup_guard() {
 
 # Report missing prerequisites from scripts/preflight.py and point at the fix.
 preflight_gate() {
-  local mode="$1" transport="$2" report kind detail
+  local mode="$1" transport="$2" online_services="$3" report kind detail
   local extras="" fetch="" rag=0 rag_public=0 keys=""
-  report="$(uv run python scripts/preflight.py --mode "$mode" --transport "$transport" 2>/dev/null)" \
+  report="$(uv run python scripts/preflight.py --mode "$mode" --transport "$transport" \
+    --online-services "$online_services" 2>/dev/null)" \
     || { echo "start: preflight failed — run: uv run python scripts/preflight.py" >&2; exit 1; }
   while read -r kind detail; do
     case "$kind" in
@@ -254,6 +305,23 @@ cmd_start() {
     echo "start: LOCAT_ONLINE_ONLY and LOCAT_OFFLINE_ONLY are both set — offline-only wins."
   fi
 
+  # Serve flags win over pins, same as modes.validate_modes() — refuse the
+  # conflict now instead of at the first connect.
+  check_service_pins
+  local crossing pinned_local
+  crossing="$(pins_matching online)"
+  pinned_local="$(pins_matching offline)"
+  if [[ "$mode" == "offline-only" && -n "$crossing" ]]; then
+    echo "locat: --offline-only (LOCAT_OFFLINE_ONLY=1) conflicts with $crossing — those services would cross the network" >&2
+    echo "locat: clear the pin in $ENV_FILE, or start without --offline-only" >&2
+    exit 1
+  fi
+  if [[ "$mode" == "online-only" && -n "$pinned_local" ]]; then
+    echo "locat: --online-only (LOCAT_ONLINE_ONLY=1) conflicts with $pinned_local — the local stack is not brought up" >&2
+    echo "locat: clear the pin in $ENV_FILE, or start without --online-only" >&2
+    exit 1
+  fi
+
   case "$transport" in
     browser|headphones) ;;
     *) echo "locat: unknown transport '$transport' — valid: browser (default), headphones" >&2; exit 1 ;;
@@ -296,7 +364,7 @@ cmd_start() {
     fi
   fi
 
-  preflight_gate "$mode" "$transport"
+  preflight_gate "$mode" "$transport" "$(online_capable_services "$mode")"
 
   if [[ "$mode" == "online-only" ]]; then
     echo "start: online-only — sessions run on Deepgram/OpenAI/Cartesia; Ollama stays down."
@@ -462,6 +530,13 @@ cmd_help() {
       echo "  --cascade-simple-chat  STT, LLM, TTS with no tools — chat only, offline only"
       echo "                    (LOCAT_ARCHITECTURE=cascade-simple-chat; overrides online-only)"
       echo "  flags win over .locatrc; both vars set means offline-only wins"
+      echo "  per-service pins, from $ENV_FILE or the environment, each session|offline|online:"
+      echo "    LOCAT_STT_MODE    speech recognition  (default session)"
+      echo "    LOCAT_LLM_MODE    the brain: persona, architecture, which RAG db opens"
+      echo "    LOCAT_TTS_MODE    the reply voice      (default session)"
+      echo "                    session follows what the connect asks for; a pin wins over it, so"
+      echo "                    LOCAT_LLM_MODE=online is a cloud brain with local ears and voice"
+      echo "                    a pin that crosses --offline-only / --online-only is refused here"
       echo "  checks prerequisites first: a fresh clone gets 'setup needed: run \"./locat.sh setup\"',"
       echo "  missing models/extras/indexes get the exact command to run"
       echo "  brings up Ollama first if nothing answers on \$OLLAMA_HOST (and records its pid)" ;;
@@ -473,6 +548,8 @@ cmd_help() {
       echo "usage: ./locat.sh status [-v]"
       echo "  machine hardware, ollama (ownership + store), bot, configured models (full paths),"
       echo "  rag index, and an inventory of every model on disk with sizes"
+      echo "  the modes line shows the per-service pins (LOCAT_STT_MODE / LOCAT_LLM_MODE /"
+      echo "  LOCAT_TTS_MODE); session means that service follows what the connect asks for"
       echo "  -v, --verbose   also print the full STT/LLM/TTS catalogs (every model, even ones"
       echo "                  too big for this machine)" ;;
     index-rag)
@@ -531,6 +608,7 @@ cmd_status() {
     echo "bot      not running (./locat.sh start)"
   fi
 
+  echo "modes    stt $(pin_of stt), llm $(pin_of llm), tts $(pin_of tts)  (session = follows the connect; pin with LOCAT_STT_MODE/LOCAT_LLM_MODE/LOCAT_TTS_MODE)"
   model_lines --bare
   echo "rag      $(rag_line)"
   echo "  public $(public_rag_line)"
