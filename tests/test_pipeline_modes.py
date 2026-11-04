@@ -192,7 +192,7 @@ def test_online_split_is_the_default_and_builds_llm_with_backend(
     # The front holds no context tools — delegate is pipecat's stock builtin.
     assert tool_names(built.context) == []
     assert built.context.messages[0]["content"].startswith(
-        "You are a private financial thinking partner. This session is running in online mode"
+        "You are a language-learning partner and public-documents guide."
     )
 
     lwb = next(p for p in built.pipeline._processors if isinstance(p, LLMWithBackend))

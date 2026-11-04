@@ -79,3 +79,13 @@ def test_offline_greeting_drops_the_financial_partner_identity(monkeypatch):
     assert "financial thinking partner" not in opener
     assert "records" in opener.lower()
     assert "offline" in opener.lower()
+
+
+def test_online_greeting_drops_the_financial_partner_identity(monkeypatch):
+    """Online opens as a language-learning partner, not a finance one."""
+    monkeypatch.delenv("LOCAT_ONLINE_GREETING", raising=False)
+
+    opener = config.online_greeting()
+
+    assert "financ" not in opener.lower()
+    assert "language" in opener.lower()

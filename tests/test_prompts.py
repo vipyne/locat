@@ -6,7 +6,8 @@ OFFLINE_IDENTITY = (
     "You are a private records and thinking partner. You run entirely offline"
 )
 ONLINE_IDENTITY = (
-    "You are a private financial thinking partner. This session is running in online mode"
+    "You are a language-learning partner and public-documents guide. This session is"
+    " running in online mode"
 )
 REDIRECT_LINE = (
     "I can't look that up in this mode — restart me in the full records mode."
@@ -76,3 +77,44 @@ def test_analyst_prompt_opens_on_a_persona_neutral_framing():
 def test_simple_chat_prompt_still_forbids_inventing_records():
     assert "Never invent a record" in tunables.LOCAT_SIMPLE_CHAT_PROMPT
     assert "no access to their records" in tunables.LOCAT_SIMPLE_CHAT_PROMPT
+
+
+def test_online_prompts_drop_the_financial_partner_identity():
+    for prompt in (
+        tunables.LOCAT_ONLINE_GREETING,
+        tunables.LOCAT_ONLINE_CASCADE_PROMPT,
+        tunables.LOCAT_ONLINE_FRONT_PROMPT,
+        tunables.LOCAT_ONLINE_ANALYST_PROMPT,
+    ):
+        assert "financ" not in prompt.lower()
+
+
+def test_online_prompts_open_as_a_language_learning_partner():
+    for prompt in (
+        tunables.LOCAT_ONLINE_GREETING,
+        tunables.LOCAT_ONLINE_CASCADE_PROMPT,
+        tunables.LOCAT_ONLINE_FRONT_PROMPT,
+    ):
+        assert "language-learning partner" in prompt
+
+
+def test_online_cascade_keeps_spanish_practice_and_the_public_documents():
+    assert "Spanish" in tunables.LOCAT_ONLINE_CASCADE_PROMPT
+    assert "tax code documents" in tunables.LOCAT_ONLINE_CASCADE_PROMPT
+
+
+def test_online_front_prompt_opens_on_spanish_practice():
+    """Both online architectures lead with practice, not with the documents."""
+    assert "practice their Spanish" in tunables.LOCAT_ONLINE_FRONT_PROMPT
+
+
+def test_online_analyst_stays_scoped_to_the_public_documents():
+    assert "public reference documents" in tunables.LOCAT_ONLINE_ANALYST_PROMPT
+    assert "semantic_search" in tunables.LOCAT_ONLINE_ANALYST_PROMPT
+
+
+def test_online_front_prompt_keeps_the_private_records_boundary():
+    prompt = tunables.LOCAT_ONLINE_FRONT_PROMPT
+
+    assert "private records are not available here" in prompt
+    assert "Always answer in the language of the question asked." in prompt
