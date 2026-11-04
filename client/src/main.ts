@@ -12,7 +12,7 @@ import {
 import {
   attachConfigPanel,
   attachModeToggle,
-  attachMoneyRain,
+  attachGlyphRain,
   attachOnlineBanner,
   attachRagPanel,
   attachStopwatch,
@@ -165,7 +165,7 @@ attachBotAudio(client);
 const transcript = attachTranscript(client, transcriptPane);
 attachConfigPanel(client, configLines);
 attachRagPanel(client, ragTurns);
-attachMoneyRain(client, document.querySelector<HTMLElement>("#rag-panel")!);
+attachGlyphRain(client, document.querySelector<HTMLElement>("#rag-panel")!);
 attachModeToggle(client, document.querySelector<HTMLButtonElement>("#mode-toggle")!);
 attachOnlineBanner(client, document.querySelector<HTMLElement>("#online-banner")!);
 attachStopwatch(client, document.querySelector<HTMLElement>("#rag-stopwatch")!);

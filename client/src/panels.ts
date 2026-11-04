@@ -294,7 +294,7 @@ export function attachModeToggle(client: PipecatClient, button: HTMLButtonElemen
 }
 
 // Live stopwatch while a records lookup is in flight; freezes the final time
-// so the audience sees what the analyst cost. Same lifecycle as the money
+// so the audience sees what the analyst cost. Same lifecycle as the glyph
 // rain: locat-busy starts it, locat-rag / locat-idle stop it.
 export function attachStopwatch(client: PipecatClient, el: HTMLElement): void {
   let interval: number | undefined;
@@ -333,11 +333,12 @@ export function attachStopwatch(client: PipecatClient, el: HTMLElement): void {
   });
 }
 
-const MONEY_RAIN_MS = 30_000;
-const MONEY_DROPS = 18;
-const MONEY_EMOJI = ["\u{1F4B8}", "\u{1FA99}", "\u{1F4B5}", "\u{1F4B0}"];
+const GLYPH_RAIN_MS = 30_000;
+const GLYPH_DROPS = 18;
+// One character per writing system a learner runs into.
+const GLYPHS = ["\u3042", "\u6F22", "\uD55C", "\u00F1", "\u00E9", "\u00DF", "\u03BB", "\u0416", "\u0915", "\u0E01", "\u05D0", "\u0639"];
 
-export function attachMoneyRain(client: PipecatClient, host: HTMLElement): void {
+export function attachGlyphRain(client: PipecatClient, host: HTMLElement): void {
   let rain: HTMLElement | null = null;
   let timeout: number | undefined;
 
@@ -350,12 +351,12 @@ export function attachMoneyRain(client: PipecatClient, host: HTMLElement): void 
   function start(): void {
     stop();
     rain = document.createElement("div");
-    rain.className = "money-rain";
+    rain.className = "glyph-rain";
     rain.setAttribute("aria-hidden", "true");
-    for (let i = 0; i < MONEY_DROPS; i++) {
+    for (let i = 0; i < GLYPH_DROPS; i++) {
       const drop = document.createElement("span");
-      drop.className = "money-drop";
-      drop.textContent = MONEY_EMOJI[i % MONEY_EMOJI.length];
+      drop.className = "glyph-drop";
+      drop.textContent = GLYPHS[i % GLYPHS.length];
       drop.style.left = `${Math.random() * 92}%`;
       drop.style.animationDelay = `${Math.random() * 2.4}s`;
       drop.style.animationDuration = `${2 + Math.random() * 2}s`;
@@ -363,7 +364,7 @@ export function attachMoneyRain(client: PipecatClient, host: HTMLElement): void 
       rain.append(drop);
     }
     host.append(rain);
-    timeout = window.setTimeout(stop, MONEY_RAIN_MS);
+    timeout = window.setTimeout(stop, GLYPH_RAIN_MS);
   }
 
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {

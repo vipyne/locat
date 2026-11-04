@@ -299,21 +299,23 @@ button {
   overflow: hidden;
 }
 
-.money-rain {
+.glyph-rain {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.money-drop {
+.glyph-drop {
   position: absolute;
   top: -2rem;
-  animation-name: money-fall;
+  font-weight: 700;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+  animation-name: glyph-fall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
 
-@keyframes money-fall {
-  from { transform: translateY(0) rotate(0deg); opacity: 1; }
-  to   { transform: translateY(70vh) rotate(360deg); opacity: 0.1; }
+@keyframes glyph-fall {
+  from { transform: translateY(0) rotate(-12deg); opacity: 1; }
+  to   { transform: translateY(70vh) rotate(12deg); opacity: 0.1; }
 }
