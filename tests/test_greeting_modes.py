@@ -67,3 +67,15 @@ def test_offline_greeting_default_is_finances_greeting(monkeypatch):
 def test_simple_chat_greeting_never_mentions_finances():
     """Chat-only mode has no records access, so its opener promises none."""
     assert "financ" not in tunables.LOCAT_SIMPLE_CHAT_GREETING.lower()
+
+
+def test_offline_greeting_drops_the_financial_partner_identity(monkeypatch):
+    """Offline opens as a private records partner, not a finance one."""
+    monkeypatch.delenv("LOCAT_GREETING", raising=False)
+    monkeypatch.delenv("LOCAT_ARCHITECTURE", raising=False)
+
+    opener = config.greeting()
+
+    assert "financial thinking partner" not in opener
+    assert "records" in opener.lower()
+    assert "offline" in opener.lower()
