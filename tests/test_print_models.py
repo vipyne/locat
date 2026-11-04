@@ -235,3 +235,42 @@ def test_model_entries_simple_chat_omits_embed_and_analyst(monkeypatch):
     assert "ANALYST" not in roles
     by_role = {e["role"]: e for e in entries}
     assert by_role["LLM"]["model"].startswith(config.llm_model())
+
+
+def test_model_entries_tags_offline_rows_with_their_mode(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+
+    assert entries
+    assert all(e["mode"] == "offline" for e in entries)
+
+
+def test_model_entries_accepts_bare_online_string(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries("online")
+
+    assert [e["role"] for e in entries] == ["STT", "LLM", "TTS", "EMBED"]
+    assert all(e["mode"] == "online" for e in entries)
+    assert all(e["path"] == "—" for e in entries)
+
+
+def test_model_entries_mixed_session_lists_both_modes_together(monkeypatch):
+    from scripts import print_models
+    from modes import SessionModes
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    modes = SessionModes(session="online", stt="offline", llm="online", tts="offline")
+
+    entries = print_models.model_entries(modes)
+    by_role = {e["role"]: e for e in entries}
+
+    assert by_role["STT"]["mode"] == "offline"
+    assert by_role["LLM"]["mode"] == "online"
+    assert by_role["TTS"]["mode"] == "offline"
+    assert "cloud" in by_role["LLM"]["model"]
+    assert "ANALYST" not in by_role
+    assert by_role["EMBED"]["mode"] == "online"

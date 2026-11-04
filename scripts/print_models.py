@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from modes import OFFLINE_MODE, ONLINE_MODE, as_modes  # noqa: E402
 
 OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
 NOT_DOWNLOADED = "(not downloaded yet)"
@@ -368,13 +369,18 @@ def _tts_line() -> str:
     return f"unknown engine '{engine}'"
 
 
-def _entry(role: str, model: str, found: Path | None) -> dict:
+def _entry(role: str, model: str, found: Path | None, mode: str = OFFLINE_MODE) -> dict:
     return {
         "role": role,
         "model": model,
         "path": _path_line(found),
         "missing": _missing(found),
+        "mode": mode,
     }
+
+
+def _online_entry(role: str, model: str) -> dict:
+    return {"role": role, "model": model, "path": "—", "missing": False, "mode": ONLINE_MODE}
 
 
 def _llm_entry() -> dict:
@@ -387,41 +393,47 @@ def _llm_entry() -> dict:
     )
 
 
-def online_model_entries() -> list[dict]:
-    """Online session's four rows — cloud model names only, no local paths."""
-    return [
-        {"role": role, "model": model, "path": "—", "missing": False}
-        for role, model in (
-            ("STT", f"{config.online_stt_model()} (Deepgram cloud)"),
-            ("LLM", f"{config.online_llm_model()} (OpenAI cloud)"),
-            ("TTS", f"{config.online_tts_voice()} (Cartesia cloud)"),
-            ("EMBED", f"{config.online_embed_model()} (OpenAI cloud)"),
-        )
-    ]
+def model_entries(modes=OFFLINE_MODE) -> list[dict]:
+    """Importable form of the model lines (bot_browser sends them as `locat-config`).
 
-
-def model_entries(mode: str = "offline") -> list[dict]:
-    """Importable form of the model lines (bot_browser sends them as `locat-config`)."""
-    if mode == "online":
-        return online_model_entries()
+    Accepts a ``SessionModes`` or a bare "offline"/"online" string (coerced to
+    all three services that mode). STT and TTS key off their own mode; LLM,
+    ANALYST and EMBED all key off the LLM (brain) mode, so a mixed session can
+    list e.g. an offline STT row next to an online LLM row.
+    """
+    modes = as_modes(modes)
     ollama = f"(Ollama @ {config.ollama_base_url()})"
     arch = config.architecture()
-    entries = [
-        _entry("STT", _stt_line(), _stt_file()),
-        _llm_entry(),
-    ]
-    # Split runs the records analyst as its own (always local) model.
-    if arch == "llmwithbackend":
-        entries.append(
-            _entry(
-                "ANALYST",
-                f"{config.rag_llm_model()} {ollama}",
-                _ollama_file(config.rag_llm_model()),
+    entries = []
+
+    if modes.stt == ONLINE_MODE:
+        entries.append(_online_entry("STT", f"{config.online_stt_model()} (Deepgram cloud)"))
+    else:
+        entries.append(_entry("STT", _stt_line(), _stt_file()))
+
+    if modes.llm == ONLINE_MODE:
+        entries.append(_online_entry("LLM", f"{config.online_llm_model()} (OpenAI cloud)"))
+    else:
+        entries.append(_llm_entry())
+        # Split runs the records analyst as its own (always local) model.
+        if arch == "llmwithbackend":
+            entries.append(
+                _entry(
+                    "ANALYST",
+                    f"{config.rag_llm_model()} {ollama}",
+                    _ollama_file(config.rag_llm_model()),
+                )
             )
-        )
-    entries.append(_entry("TTS", _tts_line(), _tts_file()))
+
+    if modes.tts == ONLINE_MODE:
+        entries.append(_online_entry("TTS", f"{config.online_tts_voice()} (Cartesia cloud)"))
+    else:
+        entries.append(_entry("TTS", _tts_line(), _tts_file()))
+
+    if modes.llm == ONLINE_MODE:
+        entries.append(_online_entry("EMBED", f"{config.online_embed_model()} (OpenAI cloud)"))
     # simple-chat never builds a records index, so it has no embed model.
-    if arch != "cascade-simple-chat":
+    elif arch != "cascade-simple-chat":
         entries.append(
             _entry(
                 "EMBED",

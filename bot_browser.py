@@ -308,7 +308,7 @@ def _locat_config_message(modes=None) -> dict:
         "type": CONFIG_MESSAGE_TYPE,
         "mode": brain,
         "service_modes": {name: getattr(session_modes, name) for name in SERVICES},
-        "models": model_entries(brain),
+        "models": model_entries(session_modes),
         "ollama_host": config.ollama_base_url(),
         "ollama_started_by_locat": (Path(config.state_dir()) / "ollama.pid").is_file(),
         "architecture": config.architecture(),
