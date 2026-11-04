@@ -12,7 +12,8 @@ After it finishes you can turn off Wi-Fi and ``uv run bot.py`` will find every
 weight locally. What it fetches:
 
     * Ollama LLM + embed model — pulled via ``ollama pull`` (temporary
-      ``ollama serve`` is started if none is running).
+      ``ollama serve`` is started if none is running). Tags the store already
+      holds are skipped; pass ``--force`` to re-pull them anyway.
     * STT — whichever engine LOCAT_STT_ENGINE selects: Whisper-MLX snapshot on
       Apple Silicon, faster-whisper / Moonshine weights elsewhere.
     * Kokoro (TTS)       — ONNX model + voices bundle.
@@ -119,11 +120,38 @@ def _ollama_server_up() -> bool:
         return False
 
 
-def prefetch_ollama_models() -> None:
+def _with_latest(tag: str) -> str:
+    """Tag as Ollama reports it: a bare name means ``:latest``."""
+    return tag if ":" in tag else f"{tag}:latest"
+
+
+def served_tags() -> set[str]:
+    """Tags the reachable Ollama server already holds, empty when none answers.
+
+    The running server is the truth about what a pull would re-download: it may
+    serve a different store than ``OLLAMA_MODELS`` (a menu-bar Ollama.app, or an
+    ``OLLAMA_MODELS`` line in ``.locatrc`` pointing at ``~/.ollama``).
+    """
+    url = config.ollama_api_url().rstrip("/") + "/api/tags"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            models = json.loads(resp.read()).get("models", [])
+    except (urllib.error.URLError, OSError, ValueError):
+        return set()
+    return {_with_latest(str(m.get("name", ""))) for m in models}
+
+
+def tags_to_pull(wanted: list[str], present: set[str]) -> list[str]:
+    """Wanted tags the store is missing, in order."""
+    return [tag for tag in wanted if _with_latest(tag) not in present]
+
+
+def prefetch_ollama_models(force: bool = False) -> None:
     """Pull the LLM + embed model into the Ollama store (OLLAMA_MODELS).
 
     Reuses a running Ollama server when one is reachable; otherwise starts a
-    temporary ``ollama serve`` for the pulls and stops it afterwards.
+    temporary ``ollama serve`` for the pulls and stops it afterwards. Tags the
+    server already serves are left alone — ``force`` re-pulls them.
     """
     if shutil.which("ollama") is None:
         raise SystemExit(
@@ -137,7 +165,7 @@ def prefetch_ollama_models() -> None:
 
     server: subprocess.Popen | None = None
     if _ollama_server_up():
-        logger.info("Ollama: server already running — pulling into it.")
+        logger.info(f"Ollama: server already running at {host} — pulling into its own store.")
     else:
         logger.info(f"Ollama: starting temporary server (store → {os.environ['OLLAMA_MODELS']}) ...")
         server = subprocess.Popen(
@@ -153,7 +181,12 @@ def prefetch_ollama_models() -> None:
             time.sleep(0.5)
 
     try:
-        for tag in ollama_tags():
+        wanted = ollama_tags()
+        present = set() if force else served_tags()
+        for tag in wanted:
+            if _with_latest(tag) in present:
+                logger.success(f"Ollama: '{tag}' already in the store — skipping pull.")
+                continue
             logger.info(f"Ollama: pulling '{tag}' ...")
             try:
                 subprocess.run(["ollama", "pull", tag], check=True)
@@ -276,12 +309,13 @@ def verify_bundled_models() -> None:
 
 
 def main() -> None:
+    force = "--force" in sys.argv[1:]
     models_dir = Path(config.model_dir())
     Path(os.environ["HF_HOME"]).mkdir(parents=True, exist_ok=True)
     Path(config.kokoro_model_path()).parent.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Prefetching models into {models_dir} (HF_HOME={os.environ['HF_HOME']})")
-    prefetch_ollama_models()
+    prefetch_ollama_models(force=force)
     prefetch_stt()
     prefetch_kokoro()
     prefetch_daily_bundles()
