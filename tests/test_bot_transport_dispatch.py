@@ -3,7 +3,22 @@ on client-connected and ends the session on disconnect."""
 
 import asyncio
 
+import pytest
+
+import bot
 import bot_browser
+import config
+from modes import ONLINE_MODE
+
+
+@pytest.fixture(autouse=True)
+def clean_pins(monkeypatch):
+    for name in config.ONLINE_KEY_NAMES:
+        monkeypatch.setenv(name, f"fake-{name.lower()}")
+    monkeypatch.delenv("LOCAT_ONLINE_ONLY", raising=False)
+    monkeypatch.delenv("LOCAT_OFFLINE_ONLY", raising=False)
+    for name in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 class SmallWebRTCRunnerArguments:  # same class NAME the runner uses
@@ -94,3 +109,32 @@ def test_webrtc_handlers_greet_and_end_session(monkeypatch):
     assert len(worker.queued) == 1
     asyncio.run(transport.handlers["on_client_disconnected"](transport, object()))
     assert worker.cancelled
+
+
+def test_resolve_session_modes_defaults_all_offline():
+    session_modes = bot._resolve_session_modes()
+    assert session_modes.session == "offline"
+    assert session_modes.all_offline
+
+
+def test_resolve_session_modes_applies_a_pin(monkeypatch):
+    monkeypatch.setenv("LOCAT_TTS_MODE", "online")
+    session_modes = bot._resolve_session_modes()
+    assert session_modes.tts == ONLINE_MODE
+    assert session_modes.llm != ONLINE_MODE
+
+
+def test_resolve_session_modes_exits_on_offline_only_conflict(monkeypatch):
+    monkeypatch.setenv("LOCAT_OFFLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    with pytest.raises(SystemExit) as excinfo:
+        bot._resolve_session_modes()
+    assert "--offline-only" in str(excinfo.value.code)
+
+
+def test_resolve_session_modes_exits_on_missing_cloud_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LOCAT_LLM_MODE", "online")
+    with pytest.raises(SystemExit) as excinfo:
+        bot._resolve_session_modes()
+    assert "OPENAI_API_KEY" in str(excinfo.value.code)

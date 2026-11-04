@@ -3,10 +3,19 @@ import pytest
 import bot
 import config
 import services
+from modes import resolve_modes
 from scripts.print_models import stt_repo_id
 
 REPO = "mlx-community/whisper-large-v3-turbo"
 REPO_DIRNAME = "models--mlx-community--whisper-large-v3-turbo"
+
+
+@pytest.fixture(autouse=True)
+def clean_pins(monkeypatch):
+    for name in config.ONLINE_KEY_NAMES:
+        monkeypatch.setenv(name, f"fake-{name.lower()}")
+    for name in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _add_snapshot(hub, *filenames, dangling=False):
@@ -103,3 +112,22 @@ def test_build_stt_receives_external_snapshot_path(hubs):
     snap = _add_snapshot(external_hub, "weights.safetensors")
     service = services.build_stt()
     assert service._settings.model == str(snap)
+
+
+def test_stt_pinned_online_skips_the_whisper_preflight(monkeypatch):
+    ran = []
+    monkeypatch.setattr(bot, "_preflight_llm", lambda url: ran.append("llm"))
+    monkeypatch.setattr(bot, "_preflight_rag", lambda: ran.append("rag"))
+    monkeypatch.setattr(bot, "_preflight_stt", lambda: ran.append("stt"))
+    monkeypatch.setenv("LOCAT_STT_MODE", "online")
+    bot._run_local_preflights(resolve_modes("offline"))
+    assert ran == ["llm", "rag"]
+
+
+def test_stt_session_default_runs_the_whisper_preflight(monkeypatch):
+    ran = []
+    monkeypatch.setattr(bot, "_preflight_llm", lambda url: ran.append("llm"))
+    monkeypatch.setattr(bot, "_preflight_rag", lambda: ran.append("rag"))
+    monkeypatch.setattr(bot, "_preflight_stt", lambda: ran.append("stt"))
+    bot._run_local_preflights(resolve_modes("offline"))
+    assert ran == ["llm", "rag", "stt"]
