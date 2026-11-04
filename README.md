@@ -1,15 +1,24 @@
 # locat — a local, fully-offline Pipecat voice bot
 
-An AI voice bot that runs Key-Free & **100% offline**. Speech-to-text, the language
-model, and text-to-speech are all local services; your documents never leave
-your machine. Built using [Pipecat](https://github.com/pipecat-ai/pipecat)
-**≥ 1.13** and [Ollama](https://ollama.com/). Its default prompts steer it
-to be a private financial thinking partner: something you
-can talk through money decisions with, out loud, knowing nothing you say
-leaves the computer.
+> WIP but isn't everything?
 
-There is also an online version, requiring STT, LLM, and TTS service API keys.
-That version is an ideal language learning partner. Read on to learn more.
+An AI voice bot that runs Key-Free & **100% offline**. Speech-to-text, the language
+model, and text-to-speech are all local services; your records never leave
+your machine. Built using [Pipecat](https://github.com/pipecat-ai/pipecat)
+**≥ 1.13** and [Ollama](https://ollama.com/).
+
+Two personas ship with it, same code, different prompts:
+
+- **Offline — a private records and thinking partner.** Point it at your own
+  files and talk through them out loud. The privacy is the whole point: it is
+  why you can think out loud with it at all.
+- **Online — a language-learning partner**, and a guide to the public
+  documents in `data/public/`. Needs STT, LLM, and TTS API keys, and it holds a
+  two-way conversation in Spanish far better than a 7B on a laptop can.
+
+Prompts have no env var: every system prompt and canned line lives in
+[`tunables.py`](tunables.py), and editing that file IS how you change the
+personality. Read on to learn more.
 
 ---
 
@@ -66,15 +75,15 @@ For more configuration and options:
 ### Bot modes cheat sheet:
 - Offline
 ```bash
-./locat.sh --offline-only --cascade-simple-chat # simple STT,LLM,TTS bot; no tool calls
-./locat.sh --offline-only --cascade             # STT,LLM,TTS bot; tool calls available
-./locat.sh --offline-only --llmwithbackend      # front LLM for chat + back/analyst LLM for tool calls
+./locat.sh start --offline-only --cascade-simple-chat # simple STT,LLM,TTS bot; no tool calls
+./locat.sh start --offline-only --cascade             # STT,LLM,TTS bot; tool calls available
+./locat.sh start --offline-only --llmwithbackend      # front LLM for chat + back/analyst LLM for tool calls
 ```
 
 - Online
 ```bash
-./locat.sh --online-only --cascade             # STT,LLM,TTS bot; tool calls available
-./locat.sh --online-only --llmwithbackend      # front LLM for chat + back/analyst LLM for tool calls
+./locat.sh start --online-only --cascade              # STT,LLM,TTS bot; tool calls available
+./locat.sh start --online-only --llmwithbackend       # front LLM for chat + back/analyst LLM for tool calls
 ```
 
 ## Setup
@@ -220,7 +229,7 @@ The question: *what can this computer actually run?* The process:
    |---|---|---|
    | 7B (`qwen2.5:7b`) | ~3.5 GB | **~4.5 GB** |
    | 8B (`qwen3:8b`) | ~4.0 GB | ~5 GB |
-   | 14B (`qwen2.5:14b`) | ~7 GB | **~9 GB** |
+   | 14B (Qwen2.5-14B) | ~7 GB | **~9 GB** |
    | 27B (`qwen3.8:27b`) | ~14 GB | **17.7 GB** |
 
    Add **~2 GB for STT + TTS** (Whisper-MLX large-v3-turbo plus Kokoro), and
@@ -259,7 +268,7 @@ Set the choice with env vars — same code:
 The browser's audio stack ships acoustic echo cancellation, so the page at
 http://localhost:7860 can use your speakers without the bot interrupting
 itself. Not the internet — just the web browser, talking to the bot over
-loopback.
+loopback. Do this and 🎉, you have echo cancellation.
 
 **The browser transport follows the session mode.** An offline session is
 allowed to have no network at all, and WebRTC can't connect airgapped — with
@@ -280,7 +289,7 @@ outranks the mode:
   in every browser and across every boundary (including Windows↔WSL2, where
   UDP never crosses). Pin this one on WSL2 so online sessions skip the webrtc
   attempt.
-- **SmallWebRTC** (`?transport=webrtc`, *online default*): UDP media over
+- **WebRTC** (`?transport=webrtc`, *online default*): UDP media over
   loopback, in the base install (aiortc ships a pure-Python wheel). Needs UDP
   to reach the bot — so not across Windows↔WSL2, and not with wi-fi off.
 
@@ -306,7 +315,7 @@ uv sync --extra local-audio       # the extra adds PyAudio (needs PortAudio)
 
 ### D. Retrieval (your transactions and documents)
 
-The bot answers real questions about your own money — fully offline, no
+The bot answers real questions about your own records — fully offline, no
 vector database server. `data/` holds the documents, and the split is the
 privacy boundary:
 
@@ -329,12 +338,15 @@ simply converses.
 
 #### The tools
 
-Chunk-and-embed similarity search alone cannot answer "how much did I spend
-on groceries?" — the grocery rows scatter across chunks and nothing adds them
-up. Structured data wants typed queries, so retrieval is four tools over
-SQLite, and all arithmetic happens in SQL. The model never writes SQL itself —
-each tool takes whitelisted arguments and builds a parameterized query, capped
-at five rows or chunks per result:
+An earlier version did RAG the way most tutorials do — chunk the CSV, embed
+the chunks, retrieve by cosine similarity. It could not answer "how much did I
+spend on groceries?", because the grocery rows were scattered across chunks
+and nothing could add them up. That version lives in the git history.
+
+Structured data wants typed queries, not similarity search. So retrieval is
+four tools over SQLite, and all arithmetic happens in SQL. The model never
+writes SQL itself — each tool takes whitelisted arguments and builds a
+parameterized query, capped at five rows or chunks per result:
 
 | Tool | For |
 |---|---|
@@ -408,7 +420,10 @@ carries pubs only. Drop in whatever reference documents fit your life
 
 Offline is the point of this repo. Online mode exists for the two things a
 local 7B on a laptop can't do well: answer a tax question in about two
-seconds, and/or hold a **two-way** conversation in another language. You pick per
+seconds, and/or hold a **two-way** conversation in another language. The
+persona swaps with the mode — offline you get the private records and thinking
+partner, online you get the language-learning partner and public-documents
+guide (both in [`tunables.py`](tunables.py)). You pick per
 session, in the browser, before you Connect — the `🔌 offline` / `☁️ online`
 control sits next to the Connect button and is disabled while connected. The
 choice round-trips through the URL (`?mode=online`), so a reload keeps it.
@@ -478,6 +493,16 @@ usual, and an online connect is refused. Either restriction can also live in
 over the file, both unset means both modes are available, and when both vars
 are set offline-only wins. The page greys out the mode the process refuses
 and pre-selects the one it serves.
+
+#### Coming: one mode per service
+
+Session mode is all-or-nothing today — one connect, one stack. Three knobs in
+progress split it per service: `LOCAT_STT_MODE`, `LOCAT_LLM_MODE` and
+`LOCAT_TTS_MODE`, each `offline` | `online` | `session` (the default — follow
+the session). So your speech can be transcribed locally by Whisper and spoken
+back by Kokoro while only the language model goes to the cloud. The privacy
+boundary does not move: an online language model opens the public index and
+nothing else, whatever the other two services are doing.
 
 ---
 
@@ -717,12 +742,23 @@ locat/
 
 ---
 
-## Not financial advice
+## Future work
 
-The bot is a private *thinking partner*, not a licensed financial advisor. It
-has no access to your real accounts, only the documents you give it access
-to. Always, _always_ consult a human after consulting a bot, in all matters,
-financial or otherwise.
+**RTP over WebTransport**, as a third browser transport. WebRTC wants a network
+to gather ICE candidates, which is exactly what an airgapped session doesn't
+have, so offline sessions fall back to TCP over websocket. Framing the media as
+RTP and carrying it over a WebTransport session would get the datagram latency
+without the candidate gathering — one transport for both modes.
+
+---
+
+## Not advice
+
+The bot is a private *thinking partner*, not a licensed anything. It has no
+access to your real accounts, only the files you hand it.
+Ha, claude wrote that^ when I said I wanted a fully offline bot I could talk to
+about my own records. But yes: _always_ consult a human after consulting a bot,
+in all matters.
 
 ## Emojis
 claude did _not_ add enough/any emojis so: 
