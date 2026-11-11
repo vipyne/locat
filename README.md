@@ -188,9 +188,8 @@ tail -f .locat/logs/bot-*
 ## Learning Objectives:
 * A. learn how to evaluate a machine and what local models it can handle
 * B. gain an understanding of why local audio is difficult
-* C. create a basic offline voice AI chatbot
-* D. add RAG to said bot to access to custom data
-* E. learn how to take this local bot to the next level by going online
+* C. add RAG to said bot to access to custom data
+* D. how to mix and match online & offline services
 
 ### A. Choosing models for your hardware
 
@@ -311,9 +310,7 @@ uv sync --extra local-audio       # the extra adds PyAudio (needs PortAudio)
 > want: `uv sync --extra local-audio --extra piper`. (`./locat.sh configure -i`
 > preserves whatever is already installed.)
 
-### C. See [above](#3-run)
-
-### D. Retrieval (your transactions and documents)
+### C. Retrieval (your transactions and documents)
 
 The bot answers real questions about your own records — fully offline, no
 vector database server. `data/` holds the documents, and the split is the
@@ -416,7 +413,7 @@ not — deeply nested numbering scatters each rule across chunks — so `data/`
 carries pubs only. Drop in whatever reference documents fit your life
 (leases, manuals, insurance policies) and re-run `./locat.sh index-rag`.
 
-### E. Online sessions
+### D. Online & mixed online/offline sessions
 
 Offline is the point of this repo. Online mode exists for the two things a
 local 7B on a laptop can't do well: answer a tax question in about two
@@ -427,6 +424,17 @@ guide (both in [`tunables.py`](tunables.py)). You pick per
 session, in the browser, before you Connect — the `🔌 offline` / `☁️ online`
 control sits next to the Connect button and is disabled while connected. The
 choice round-trips through the URL (`?mode=online`), so a reload keeps it.
+
+> [!TIP]
+> **Spanish without the cloud:** both local TTS engines speak it. Kokoro ships
+> Spanish voices in the voices file you already have — set
+> `LOCAT_KOKORO_VOICE=ef_dora` (or `em_alex` / `em_santa`) in `.locatrc` —
+> though Spanish is one of Kokoro's least-trained languages, so prosody is
+> flat. Piper sounds more natural: `uv sync --extra piper`, then
+> `LOCAT_TTS_ENGINE=piper` and `LOCAT_PIPER_VOICE=es_MX-claude-high` (really
+> its name) or `es_ES-davefx-medium`. STT needs no change — Whisper is
+> multilingual. The weak link stays the local 7B's Spanish, which is why the
+> online persona exists.
 
 | | 🔌 offline *(default)* | ☁️ online |
 |---|---|---|
@@ -723,7 +731,9 @@ Then click **Connect**, allow the mic, talk.
 
 ## Intel Macs
 
-Use [`intel-mac` branch](../../tree/intel-mac).
+> old hardware is not bad hardware
+But, `locat` will not work for you :/ Instead, checkout this [`vipyne/LO-FI branch](https://github.com/vipyne/LO-FI/tree/intel-mac).
+I applaud you for bucking throwaway culture.
 
 ## Repository layout
 
@@ -740,11 +750,12 @@ locat/
 ├── bot.py                    # the headphones/CLI bot — PyAudio in and out
 ├── pipeline.py               # the one build_pipeline() every bot shares
 ├── services.py               # STT/LLM/TTS builders, engine-dispatched
+├── modes.py                  # per-service offline/online resolution (the LOCAT_*_MODE pins)
 ├── tunables.py               # every prompt + model defaults — THE file to edit
 ├── config.py                 # env-driven settings, zero-config defaults
 ├── retrieval.py              # lookup / filter_rows / aggregate / semantic_search
 ├── ingest.py                 # extract → serialize → chunk → embed → index
-├── locat.sh                   # start | stop | status | index-rag | consolidate
+├── locat.sh                  # setup | start | stop | status | index-rag | configure | consolidate
 ├── configure.sh              # what can this machine handle?
 ├── data/                     # private/ (offline only) + public/ (online's whole world)
 ├── client/                   # the browser UI (Vite + TypeScript; prebuilt in client/dist)
@@ -753,17 +764,10 @@ locat/
 
 ---
 
-## Future work
-
-**RTP over WebTransport**, as a third browser transport. WebRTC wants a network
-to gather ICE candidates, which is exactly what an airgapped session doesn't
-have, so offline sessions fall back to TCP over websocket. Framing the media as
-RTP and carrying it over a WebTransport session would get the datagram latency
-without the candidate gathering — one transport for both modes.
-
----
-
 ## Not advice
+
+> [!IMPORTANT]
+> ALWAYS consult a human after consulting a bot, in ALL matters.
 
 The bot is a private *thinking partner*, not a licensed anything. It has no
 access to your real accounts, only the files you hand it.
