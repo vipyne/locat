@@ -348,19 +348,32 @@ cmd_start() {
 
   # Port guard: browser bot binds $LOCAT_WEB_PORT; a listener there means a
   # bot locat didn't record (ownership rule: locat kills only recorded pids).
+  # Another locat bot → refuse; foreign listener → scan up for a free port.
   if [[ "$transport" == "browser" ]] && command -v lsof >/dev/null 2>&1; then
-    local port_pid port_cmd
+    local port_pid port_cmd candidate offset
     port_pid="$(lsof -nP -tiTCP:"$LOCAT_WEB_PORT" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
     if [[ -n "$port_pid" ]]; then
       port_cmd="$(ps -o command= -p "$port_pid" 2>/dev/null || true)"
       if echo "$port_cmd" | grep -q "bot_browser.py"; then
         echo "start: port $LOCAT_WEB_PORT already serves a locat bot (pid $port_pid) locat didn't start" >&2
         echo "start: stop it with: kill $port_pid   (or ./locat.sh stop in the checkout that started it)" >&2
-      else
-        echo "start: port $LOCAT_WEB_PORT in use by pid $port_pid: ${port_cmd:-?}" >&2
-        echo "start: free the port, or pick another: LOCAT_WEB_PORT=7861 ./locat.sh start" >&2
+        exit 1
       fi
-      exit 1
+      echo "start: port $LOCAT_WEB_PORT in use by pid $port_pid: ${port_cmd:-?}" >&2
+      candidate=""
+      for offset in $(seq 1 20); do
+        if [[ -z "$(lsof -nP -tiTCP:"$((LOCAT_WEB_PORT + offset))" -sTCP:LISTEN 2>/dev/null | head -n1 || true)" ]]; then
+          candidate=$((LOCAT_WEB_PORT + offset))
+          break
+        fi
+      done
+      if [[ -z "$candidate" ]]; then
+        echo "start: no free port in $((LOCAT_WEB_PORT + 1))-$((LOCAT_WEB_PORT + 20)) — pick one: LOCAT_WEB_PORT=<port> ./locat.sh start" >&2
+        exit 1
+      fi
+      echo "start: using port $candidate instead"
+      export LOCAT_WEB_PORT="$candidate"
+      WEB_URL="http://localhost:${LOCAT_WEB_PORT}"
     fi
   fi
 
@@ -419,6 +432,9 @@ cmd_start() {
   esac
   echo $! >"$STATE_DIR/bot.pid"
   echo "$transport" >"$STATE_DIR/bot.transport"
+  if [[ "$transport" == "browser" ]]; then
+    echo "$LOCAT_WEB_PORT" >"$STATE_DIR/bot.port"
+  fi
   echo "start: bot starting (pid $(recorded_pid bot), log → ${bot_log#"$REPO"/})"
   echo "start: stop everything locat started with ./locat.sh stop"
 
@@ -580,7 +596,7 @@ cmd_status() {
   echo "machine"
   ./configure.sh --hardware
 
-  local pid transport
+  local pid transport bot_port
   local store_desc="${OLLAMA_MODELS}"
   if [[ -L "${LOCAT_MODEL_DIR}/ollama" ]]; then
     store_desc="borrowed -> $(readlink "${LOCAT_MODEL_DIR}/ollama")"
@@ -600,7 +616,8 @@ cmd_status() {
   if pid_alive "$pid"; then
     transport="$(cat "$STATE_DIR/bot.transport" 2>/dev/null || echo "?")"
     if [[ "$transport" == "browser" ]]; then
-      echo "bot      running (pid $pid), transport: browser, $WEB_URL"
+      bot_port="$(cat "$STATE_DIR/bot.port" 2>/dev/null || echo "$LOCAT_WEB_PORT")"
+      echo "bot      running (pid $pid), transport: browser, http://localhost:${bot_port}"
     else
       echo "bot      running (pid $pid), transport: $transport"
     fi

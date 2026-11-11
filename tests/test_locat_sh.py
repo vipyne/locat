@@ -622,3 +622,125 @@ def test_per_command_help_documents_the_service_mode_pins(tmp_path):
     result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
     assert result.returncode == 0
     assert "LOCAT_LLM_MODE" in result.stdout
+
+
+def _bind(port: int) -> socket.socket:
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", port))
+    s.listen(1)
+    return s
+
+
+def busy_ports_with_free_neighbor(n_busy: int) -> tuple[list[socket.socket], int]:
+    # Hold n_busy consecutive ports; the next one up is confirmed free.
+    for _ in range(50):
+        held = []
+        try:
+            held.append(_bind(0))
+            base = held[0].getsockname()[1]
+            for i in range(1, n_busy):
+                held.append(_bind(base + i))
+            _bind(base + n_busy).close()
+            return held, base
+        except OSError:
+            for s in held:
+                s.close()
+    raise RuntimeError("no run of consecutive free ports found")
+
+
+def start_env_failing_after_port_guard(tmp_path) -> dict:
+    # Empty model store + unreachable Ollama: start passes the port guard,
+    # then exits at the missing-models report without launching anything.
+    port = closed_port()
+    return {
+        **isolated_store_env(tmp_path),
+        "LOCAT_OLLAMA_BASE_URL": f"http://127.0.0.1:{port}/v1",
+    }
+
+
+def test_start_scans_past_a_port_held_by_a_foreign_process(tmp_path):
+    held, base = busy_ports_with_free_neighbor(1)
+    try:
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(base),
+        )
+        out = result.stdout + result.stderr
+        assert f"port {base} in use by pid" in out, out
+        assert f"using port {base + 1} instead" in out, out
+        assert "free the port" not in out, out
+        assert not (tmp_path / "state" / "bot.pid").exists()
+    finally:
+        for s in held:
+            s.close()
+
+
+def test_start_scans_past_several_busy_ports(tmp_path):
+    held, base = busy_ports_with_free_neighbor(2)
+    try:
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(base),
+        )
+        out = result.stdout + result.stderr
+        assert f"using port {base + 2} instead" in out, out
+    finally:
+        for s in held:
+            s.close()
+
+
+LISTENER_PRINTING_ITS_PORT = """
+import socket, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(1)
+print(s.getsockname()[1], flush=True)
+time.sleep(300)
+"""
+
+
+def test_start_still_refuses_a_port_held_by_a_locat_bot(tmp_path):
+    # argv carries "bot_browser.py" so the guard's ps check sees a locat bot.
+    squatter = subprocess.Popen(
+        [sys.executable, "-c", LISTENER_PRINTING_ITS_PORT, "bot_browser.py"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        port = int(squatter.stdout.readline())
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(port),
+        )
+        out = result.stdout + result.stderr
+        assert result.returncode == 1, out
+        assert "already serves a locat bot" in out, out
+        assert "using port" not in out, out
+    finally:
+        squatter.kill()
+
+
+def test_status_reports_the_port_the_bot_actually_bound(tmp_path):
+    bot = subprocess.Popen(["sleep", "300"])
+    try:
+        (tmp_path / "bot.pid").write_text(str(bot.pid))
+        (tmp_path / "bot.transport").write_text("browser")
+        (tmp_path / "bot.port").write_text("7912")
+        result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
+        assert result.returncode == 0
+        assert "http://localhost:7912" in result.stdout, result.stdout
+    finally:
+        bot.kill()
