@@ -1,16 +1,137 @@
 import json
+import sys
 
-from bot_moq import CONFIG_MESSAGE_TYPE, _locat_config_message
+import pytest
+
+import config
+import scripts.print_models as print_models
+from bot_browser import (
+    CONFIG_MESSAGE_TYPE,
+    _locat_config_message,
+    build_transport_params,
+    public_rag_summary,
+)
+from modes import SessionModes
+
+
+def test_transport_params_offer_websocket_and_webrtc():
+    params = build_transport_params()
+    assert "websocket" in params
+    assert "webrtc" in params  # aiortc installed in the dev env
+    assert params["webrtc"]().audio_in_enabled is True
+    assert params["webrtc"]().audio_out_enabled is True
+
+
+def test_webrtc_transport_omitted_without_aiortc(monkeypatch):
+    monkeypatch.setitem(sys.modules, "aiortc", None)
+    params = build_transport_params()
+    assert "websocket" in params
+    assert "webrtc" not in params
+
+
+def test_split_architecture_adds_analyst_row(monkeypatch):
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setenv("LOCAT_RAG_LLM_MODEL", "nemotron-3-nano:4b")
+    message = _locat_config_message()
+    roles = [m["role"] for m in message["models"]]
+    assert roles == ["STT", "LLM", "ANALYST", "TTS", "EMBED"]
+    analyst = message["models"][roles.index("ANALYST")]
+    assert "nemotron-3-nano:4b" in analyst["model"]
 
 
 def test_locat_config_message_shape():
     message = _locat_config_message()
     json.dumps(message)
     assert message["type"] == CONFIG_MESSAGE_TYPE == "locat-config"
-    assert [m["role"] for m in message["models"]] == ["STT", "LLM", "TTS", "EMBED"]
+    assert message["mode"] == "offline"
+    # Default architecture is split — the analyst backend gets its own row.
+    assert [m["role"] for m in message["models"]] == [
+        "STT",
+        "LLM",
+        "ANALYST",
+        "TTS",
+        "EMBED",
+    ]
     for entry in message["models"]:
         assert entry["model"]
         assert entry["path"].lstrip().startswith("→")
     assert message["ollama_host"].startswith("http")
     assert isinstance(message["ollama_started_by_locat"], bool)
     assert message["rag"].startswith(("index:", "no index"))
+
+
+def test_config_message_carries_mode():
+    assert _locat_config_message("offline")["mode"] == "offline"
+    assert _locat_config_message("online")["mode"] == "online"
+
+
+def test_online_model_entries_roles(monkeypatch):
+    for key in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY"):
+        monkeypatch.setenv(key, f"fake-{key}")
+    message = _locat_config_message("online")
+    roles = [m["role"] for m in message["models"]]
+    assert roles == ["STT", "LLM", "TTS", "EMBED"]
+    dumped = json.dumps(message)
+    for entry in message["models"]:
+        assert entry["path"] == "—"
+        assert "cloud" in entry["model"]
+    assert "fake-" not in dumped
+
+
+def test_model_entries_missing_flag(monkeypatch, tmp_path):
+    """A role whose weights resolve to nothing is flagged for the panel."""
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    weights = tmp_path / "weights.bin"
+    weights.write_text("x")
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    monkeypatch.setattr(print_models, "_stt_file", lambda: weights)
+    monkeypatch.setattr(print_models, "_tts_file", lambda: weights)
+    entries = {e["role"]: e for e in print_models.model_entries()}
+    assert entries["LLM"]["missing"] is True
+    assert entries["ANALYST"]["missing"] is True
+    assert entries["EMBED"]["missing"] is True
+    assert entries["STT"]["missing"] is False
+    assert entries["TTS"]["missing"] is False
+    # Cloud rows have no local weights to miss.
+    assert all(e["missing"] is False for e in print_models.model_entries("online"))
+
+
+def test_architecture_accepts_simple_chat(monkeypatch):
+    """The third offline architecture is a valid LOCAT_ARCHITECTURE value."""
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
+    assert config.architecture() == "cascade-simple-chat"
+
+
+def test_simple_chat_overrides_online_only(monkeypatch):
+    """Simple-chat is offline-only by nature, so it wins over LOCAT_ONLINE_ONLY.
+
+    A workshop machine's `.locatrc` can carry LOCAT_ONLINE_ONLY=1; with
+    simple-chat selected the process must still serve offline sessions.
+    """
+    monkeypatch.setenv("LOCAT_ONLINE_ONLY", "1")
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
+    assert config.online_only() is False
+    assert config.serve_mode() != "online-only"
+
+
+def test_config_message_carries_resolved_service_modes():
+    assert _locat_config_message("offline")["service_modes"] == {
+        "stt": "offline",
+        "llm": "offline",
+        "tts": "offline",
+    }
+
+
+def test_config_message_reports_a_mixed_session(monkeypatch):
+    """A local ear and mouth with a cloud brain: three chips, brain mode wins."""
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-openai")
+    monkeypatch.setattr(
+        config, "rag_db_path", lambda: pytest.fail("mixed session reached for the private db")
+    )
+    message = _locat_config_message(
+        SessionModes(session="offline", stt="offline", llm="online", tts="offline")
+    )
+    assert message["service_modes"] == {"stt": "offline", "llm": "online", "tts": "offline"}
+    assert message["mode"] == "online"
+    assert message["rag"] == public_rag_summary()
+    json.dumps(message)

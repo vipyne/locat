@@ -2,12 +2,22 @@ import { RTVIEvent, type PipecatClient } from "@pipecat-ai/client-js";
 
 export const CONFIG_MESSAGE_TYPE = "locat-config";
 export const RAG_MESSAGE_TYPE = "locat-rag";
+export const RAG_PENDING_MESSAGE_TYPE = "locat-rag-pending";
+export const MODE_MESSAGE_TYPE = "locat-mode";
+const BUSY_MESSAGE_TYPE = "locat-busy";
+const IDLE_MESSAGE_TYPE = "locat-idle";
 
 interface ModelEntry {
   role: string;
   model: string;
   path: string;
+  missing?: boolean;
+  mode?: string;
 }
+
+// Server flags a role whose weights resolve to nothing; the path line says
+// how to get them instead of printing a path that isn't there.
+const PREFETCH_CMD = "uv run python scripts/prefetch_models.py";
 
 interface LocatConfig {
   type: string;
@@ -15,6 +25,16 @@ interface LocatConfig {
   ollama_host: string;
   ollama_started_by_locat: boolean;
   rag: string;
+  architecture?: string;
+  mode?: string;
+  service_modes?: Record<string, string>;
+}
+
+const ONLINE = "online";
+const SERVICE_ORDER = ["stt", "llm", "tts"] as const;
+
+function onlineServices(modes: Record<string, string>): string[] {
+  return SERVICE_ORDER.filter((service) => modes[service] === ONLINE);
 }
 
 const OWNERSHIP = {
@@ -23,33 +43,77 @@ const OWNERSHIP = {
 };
 
 interface RagChunk {
-  source_path: string;
+  source: string;
   page: number | null;
-  score: number;
   text: string;
+}
+
+interface RagRoute {
+  tool: string;
+  args: Record<string, unknown>;
+  count: number;
+  elapsed_ms: number;
 }
 
 interface LocatRag {
   type: string;
-  query: string;
+  tool: string;
+  args: Record<string, unknown>;
+  count: number;
+  elapsed_ms: number;
   chunks: RagChunk[];
 }
 
 function chunkLocation(chunk: RagChunk): string {
-  const where = chunk.page === null ? chunk.source_path : `${chunk.source_path} p.${chunk.page}`;
-  return `${where} (${chunk.score.toFixed(2)})`;
+  return chunk.page == null ? chunk.source : `${chunk.source} p.${chunk.page}`;
+}
+
+function routeLine(route: RagRoute): string {
+  const args = JSON.stringify(route.args ?? {});
+  return `${route.tool} ${args} \u00b7 ${route.count} rows \u00b7 ${Math.round(route.elapsed_ms)}ms`;
+}
+
+interface LocatRagPending {
+  type: string;
+  tool: string;
+  args: Record<string, unknown>;
+  active: boolean;
+}
+
+// An analyst lookup runs 10-70s; show it in flight so silence doesn't read as
+// "nothing is happening". One call at a time, so one pending line.
+function renderPending(panel: HTMLElement, message: LocatRagPending): void {
+  clearPending(panel);
+  if (!message.active) return;
+  const turn = document.createElement("div");
+  turn.className = "rag-turn rag-pending";
+  const line = document.createElement("p");
+  line.className = "rag-route";
+  const args = JSON.stringify(message.args ?? {});
+  line.textContent = `${message.tool} ${args === "{}" ? "" : args} \u00b7 working\u2026`;
+  turn.append(line);
+  panel.prepend(turn);
+}
+
+function clearPending(panel: HTMLElement): void {
+  for (const node of panel.querySelectorAll(".rag-pending")) node.remove();
 }
 
 export function attachRagPanel(client: PipecatClient, panel: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
     const message = data as Partial<LocatRag> | null;
+    if (message?.type === RAG_PENDING_MESSAGE_TYPE) {
+      renderPending(panel, message as unknown as LocatRagPending);
+      return;
+    }
     if (message?.type !== RAG_MESSAGE_TYPE) return;
+    clearPending(panel);
     const turn = document.createElement("div");
     turn.className = "rag-turn";
-    const query = document.createElement("p");
-    query.className = "rag-query";
-    query.textContent = message.query ?? "";
-    turn.append(query);
+    const line = document.createElement("p");
+    line.className = "rag-route";
+    line.textContent = routeLine(message as unknown as RagRoute);
+    turn.append(line);
     for (const chunk of message.chunks ?? []) {
       const details = document.createElement("details");
       const summary = document.createElement("summary");
@@ -68,19 +132,246 @@ export function attachRagPanel(client: PipecatClient, panel: HTMLElement): void 
   });
 }
 
+// Vaporwave color per model role (style.css .cfg-*); LLM is sea foam green.
+const ROLE_CLASSES: Record<string, string> = {
+  STT: "cfg-stt",
+  LLM: "cfg-llm",
+  ANALYST: "cfg-analyst",
+  TTS: "cfg-tts",
+  EMBED: "cfg-embed",
+};
+
 export function attachConfigPanel(client: PipecatClient, panel: HTMLElement): void {
   client.on(RTVIEvent.ServerMessage, (data: unknown) => {
     const message = data as Partial<LocatConfig> | null;
     if (message?.type !== CONFIG_MESSAGE_TYPE) return;
-    const lines = (message.models ?? []).flatMap((entry) => [
-      `${entry.role.padEnd(7)}${entry.model}`,
-      `       ${entry.path}`,
-    ]);
-    lines.push(
-      `OLLAMA ${message.ollama_host}`,
-      `       ${message.ollama_started_by_locat ? OWNERSHIP.locat : OWNERSHIP.foreign}`,
-      `RAG    ${message.rag}`,
+    panel.replaceChildren();
+    const append = (text: string, className?: string) => {
+      if (!className) {
+        panel.append(text);
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = className;
+      span.textContent = text;
+      panel.append(span);
+    };
+    // Per-service chips: a mixed session runs e.g. offline STT with an online
+    // LLM, which the model rows alone don't spell out.
+    const serviceModes = message.service_modes;
+    if (serviceModes) {
+      append("MODES   ");
+      for (const service of SERVICE_ORDER) {
+        const mode = serviceModes[service] ?? "offline";
+        append(` ${service} ${mode} `, `svc-chip svc-${mode}`);
+        append(" ");
+      }
+      append("\n");
+    }
+    for (const entry of message.models ?? []) {
+      // "qwen2.5:7b (Ollama @ …)" → role + name colored, detail plain.
+      const detailAt = entry.model.indexOf(" (");
+      const name = detailAt === -1 ? entry.model : entry.model.slice(0, detailAt);
+      const detail = detailAt === -1 ? "" : entry.model.slice(detailAt);
+      append(`${entry.role.padEnd(8)}${name}`, ROLE_CLASSES[entry.role]);
+      if (entry.missing) {
+        append(`${detail}\n       `);
+        append(`not downloaded — run: ${PREFETCH_CMD}`, "cfg-missing");
+        append("\n");
+      } else {
+        append(`${detail}\n       ${entry.path}\n`);
+      }
+    }
+    append(
+      [
+        `OLLAMA ${message.ollama_host}`,
+        `       ${message.ollama_started_by_locat ? OWNERSHIP.locat : OWNERSHIP.foreign}`,
+        `ARCH   ${message.architecture ?? "cascade"}`,
+        `RAG    ${message.rag}`,
+      ].join("\n"),
     );
-    panel.textContent = lines.join("\n");
+  });
+}
+
+const PROVIDERS: Record<string, string> = {
+  stt: "Deepgram",
+  llm: "OpenAI",
+  tts: "Cartesia",
+};
+
+const ROLES: Record<string, string> = {
+  stt: "speech recognition",
+  llm: "the conversation",
+  tts: "the reply voice",
+};
+
+function joinWords(words: string[]): string {
+  if (words.length < 2) return words.join("");
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+// What a mixed session actually leaks: the brain's mode decides whether the
+// words cross, STT/TTS decide whether the audio does.
+function bannerDetail(modes: Record<string, string>): string {
+  const online = onlineServices(modes);
+  if (online.length === SERVICE_ORDER.length) {
+    return (
+      "conversation and retrieved public documents go to Deepgram, OpenAI, " +
+      "and Cartesia; the private records db is not mounted."
+    );
+  }
+  const words = modes.llm === ONLINE;
+  const audio = modes.stt === ONLINE || modes.tts === ONLINE;
+  let split = "your words stay local, but audio crosses the network";
+  if (words && audio) split = "both your audio and your words cross the network";
+  else if (words) split = "your audio stays on this machine, but your words cross the network";
+  const local = SERVICE_ORDER.filter((service) => modes[service] !== ONLINE);
+  return (
+    `${split} — ${joinWords(online.map((s) => PROVIDERS[s]))} ` +
+    `handle${online.length > 1 ? "" : "s"} ` +
+    `${joinWords(online.map((s) => ROLES[s]))}, ${joinWords(local.map((s) => ROLES[s]))} ` +
+    `stay${local.length > 1 ? "" : "s"} here.` +
+    (words ? " The private records db is not mounted." : "")
+  );
+}
+
+// locat-config names the session's resolved per-service modes — the banner
+// reflects what the server confirmed, not what the client requested. Any one
+// online service raises it; the wording names the audio/words split.
+export function attachOnlineBanner(client: PipecatClient, banner: HTMLElement): void {
+  client.on(RTVIEvent.ServerMessage, (data: unknown) => {
+    const message = data as Partial<LocatConfig> | null;
+    if (message?.type !== CONFIG_MESSAGE_TYPE) return;
+    const modes = message.service_modes ?? {
+      stt: message.mode ?? "offline",
+      llm: message.mode ?? "offline",
+      tts: message.mode ?? "offline",
+    };
+    const online = onlineServices(modes);
+    banner.hidden = online.length === 0;
+    if (online.length === 0) return;
+    const allOnline = online.length === SERVICE_ORDER.length;
+    banner.replaceChildren(allOnline ? "⚠️ ONLINE MODE — " : "⚠️ MIXED MODE — ");
+    const detail = document.createElement("span");
+    detail.className = "online-detail";
+    detail.textContent = bannerDetail(modes);
+    banner.append(detail);
+  });
+}
+
+interface LocatMode {
+  type: string;
+  mode: "fast" | "accurate";
+  analyst_model: string;
+  thinking: boolean;
+}
+
+const MODE_LABELS = { fast: "⚡ fast", accurate: "\u{1F9E0} accurate" };
+
+// Toggle the analyst between accurate (thinking) and fast (no-think). Hidden
+// until a locat-config message says the bot runs the observer architecture;
+// button state renders only from the server's confirmation.
+export function attachModeToggle(client: PipecatClient, button: HTMLButtonElement): void {
+  let mode: LocatMode["mode"] = "accurate";
+  button.textContent = MODE_LABELS[mode];
+
+  button.addEventListener("click", () => {
+    const next = mode === "accurate" ? "fast" : "accurate";
+    client.sendClientMessage(MODE_MESSAGE_TYPE, { mode: next });
+  });
+
+  client.on(RTVIEvent.ServerMessage, (data: unknown) => {
+    const message = data as Partial<LocatMode> & Partial<LocatConfig>;
+    if (message?.type === CONFIG_MESSAGE_TYPE) {
+      button.hidden = message.architecture !== "observer";
+      return;
+    }
+    if (message?.type !== MODE_MESSAGE_TYPE || !message.mode) return;
+    mode = message.mode;
+    button.textContent = MODE_LABELS[mode];
+    button.title = `analyst: ${message.analyst_model} · thinking ${message.thinking ? "on" : "off"}`;
+  });
+}
+
+// Live stopwatch while a records lookup is in flight; freezes the final time
+// so the audience sees what the analyst cost. Same lifecycle as the glyph
+// rain: locat-busy starts it, locat-rag / locat-idle stop it.
+export function attachStopwatch(client: PipecatClient, el: HTMLElement): void {
+  let interval: number | undefined;
+  let startedAt = 0;
+
+  function render(): void {
+    el.textContent = `${((performance.now() - startedAt) / 1000).toFixed(1)}s`;
+  }
+
+  // Freeze on the FIRST route line only — several arrive per lookup, and a
+  // stray one after idle must not resurrect a stale time.
+  function stop(frozen: boolean): void {
+    if (interval === undefined) return;
+    window.clearInterval(interval);
+    interval = undefined;
+    if (frozen) {
+      render();
+      el.textContent = `analyst: ${el.textContent}`;
+    } else {
+      el.textContent = "";
+    }
+  }
+
+  client.on(RTVIEvent.ServerMessage, (data: unknown) => {
+    const type = (data as { type?: string } | null)?.type;
+    if (type === BUSY_MESSAGE_TYPE) {
+      startedAt = performance.now();
+      window.clearInterval(interval);
+      interval = window.setInterval(render, 100);
+      render();
+    } else if (type === RAG_MESSAGE_TYPE) {
+      stop(true);
+    } else if (type === IDLE_MESSAGE_TYPE) {
+      stop(false);
+    }
+  });
+}
+
+const GLYPH_RAIN_MS = 30_000;
+const GLYPH_DROPS = 18;
+// One character per writing system a learner runs into.
+const GLYPHS = ["\u3042", "\u6F22", "\uD55C", "\u00F1", "\u00E9", "\u00DF", "\u03BB", "\u0416", "\u0915", "\u0E01", "\u05D0", "\u0639"];
+
+export function attachGlyphRain(client: PipecatClient, host: HTMLElement): void {
+  let rain: HTMLElement | null = null;
+  let timeout: number | undefined;
+
+  function stop(): void {
+    window.clearTimeout(timeout);
+    rain?.remove();
+    rain = null;
+  }
+
+  function start(): void {
+    stop();
+    rain = document.createElement("div");
+    rain.className = "glyph-rain";
+    rain.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < GLYPH_DROPS; i++) {
+      const drop = document.createElement("span");
+      drop.className = "glyph-drop";
+      drop.textContent = GLYPHS[i % GLYPHS.length];
+      drop.style.left = `${Math.random() * 92}%`;
+      drop.style.animationDelay = `${Math.random() * 2.4}s`;
+      drop.style.animationDuration = `${2 + Math.random() * 2}s`;
+      drop.style.fontSize = `${0.9 + Math.random() * 0.9}rem`;
+      rain.append(drop);
+    }
+    host.append(rain);
+    timeout = window.setTimeout(stop, GLYPH_RAIN_MS);
+  }
+
+  client.on(RTVIEvent.ServerMessage, (data: unknown) => {
+    const type = (data as { type?: string } | null)?.type;
+    if (type === BUSY_MESSAGE_TYPE) start();
+    // Route lines arrive when the backend finishes; BotOutput can't be the stop
+    // signal because the filler phrase itself is bot output.
+    if (type === RAG_MESSAGE_TYPE || type === IDLE_MESSAGE_TYPE) stop();
   });
 }

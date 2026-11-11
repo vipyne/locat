@@ -12,7 +12,9 @@ def closed_port() -> int:
         return s.getsockname()[1]
 
 CATALOG = """\
-# generated 9999999999 2099-01-01 models=5
+# generated 9999999999 2099-01-01 models=7
+brand-coder:32b|20||
+mathstral-x:24b|15||
 moe-big:30b|19|MoE, 2b active|2
 noted-thinker:32b|20|thinking|
 deepseek-r1:16b|10||
@@ -79,6 +81,37 @@ def test_reasoning_models_never_recommended_even_without_catalog_note(tmp_path):
 
     assert "deepseek-r1:16b" not in tiers.values()
     assert "noted-thinker:32b" not in tiers.values()
+
+
+def test_specialized_families_filtered_by_name(tmp_path):
+    """brand-coder:32b is the largest fit; the name filter keeps it out of the
+    listing and every tier (quality stays moe-big:30b)."""
+    stdout = run_configure(tmp_path)
+    tiers = cascade_llm_tags(stdout)
+
+    assert "brand-coder:32b" not in stdout
+    assert "mathstral-x:24b" not in stdout
+    assert tiers["best quality"] == "moe-big:30b"
+
+
+def test_fetch_catalog_keep_rejects_specialized_names():
+    from scripts.fetch_catalog import keep
+
+    assert not keep("qwen3-coder", {"tools"}, [30.0])
+    assert not keep("mathstral", set(), [7.0])
+    assert not keep("llama-guard3", set(), [8.0])
+    assert not keep("sqlcoder", set(), [15.0])
+    assert keep("qwen3", {"tools", "thinking"}, [30.0])
+    assert keep("gemma3", {"vision"}, [27.0])
+
+
+def test_fetch_catalog_keep_rejects_stale_families_keeps_unknown_age():
+    from scripts.fetch_catalog import MAX_AGE_DAYS, UNKNOWN_AGE, keep
+
+    assert not keep("qwen", {"tools"}, [32.0], age=MAX_AGE_DAYS + 1)
+    assert keep("qwen3", {"tools"}, [30.0], age=MAX_AGE_DAYS)
+    assert keep("fresh-model", set(), [7.0], age=0)
+    assert keep("age-unparsed", set(), [7.0], age=UNKNOWN_AGE)
 
 
 def write_fake_manifest(store: Path, name: str, tag: str, total_bytes: int) -> None:

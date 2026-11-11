@@ -1,8 +1,9 @@
 """config.py — env-driven settings for the fully-offline voice bot.
 
 Single source of truth for every configurable knob. All values come from the
-process environment (optionally populated from ``./.env``), with sensible
-defaults so ``uv run bot.py`` works with **zero configuration**.
+process environment (optionally populated from ``./.locatrc`` for settings and
+``./.env`` for the hosted API keys), with sensible defaults so
+``uv run bot.py`` works with **zero configuration**.
 
 Two kinds of settings live here:
 
@@ -23,28 +24,70 @@ Two kinds of settings live here:
 2. **Runtime settings** (model names, voice, device indices, greeting, log
    level). Exposed as getter functions read at *call time*, so they pick up
    whatever ``load_dotenv()`` in ``main()`` applied before the builders run.
+
+The *defaults* for models, voices, STT/TTS engines, architecture and the
+greeting live in ``tunables.py`` alongside every prompt — one file to edit. The
+getters here read them as fallbacks, so ``LOCAT_*`` env vars still override.
 """
 
 from __future__ import annotations
 
 import os
-import platform
 import sys
 from pathlib import Path
+
+# Engine and greeting defaults live in tunables.py — THE file users edit.
+# Model tags and voice ids default inline in the getters below; `.locatrc` /
+# LOCAT_* env vars override them.
+from tunables import (
+    IS_APPLE_SILICON,
+    DEFAULT_STT_ENGINE,
+    DEFAULT_TTS_ENGINE,
+    LOCAT_GREETING,
+    LOCAT_ONLINE_GREETING,
+    LOCAT_SIMPLE_CHAT_GREETING,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL_DIR = "./models"
 
 # --- Repo-local cache defaults, established at import time ------------------
-# Load ./.env FIRST — before resolving LOCAT_MODEL_DIR or setdefault-ing any
-# cache var — so user overrides win over these defaults. Mirrors
-# scripts/model_dir.sh (bash) and scripts/prefetch_models.py.
-try:
-    from dotenv import load_dotenv
+# Load the config files FIRST — before resolving LOCAT_MODEL_DIR or
+# setdefault-ing any cache var — so user overrides win over these defaults.
+# Mirrors scripts/model_dir.sh (bash) and scripts/prefetch_models.py.
 
-    load_dotenv(REPO_ROOT / ".env")
-except Exception:  # python-dotenv is a dep, but never hard-fail on config import
-    pass
+# Settings live in `.locatrc`, the three online-mode API keys in `.env`.
+SETTINGS_FILE_NAME = ".locatrc"
+KEYS_FILE_NAME = ".env"
+ONLINE_KEY_NAMES = ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY")
+# Which key each service needs to run online. OPENAI_API_KEY also buys the
+# public-index embedder, which only an online brain reaches.
+ONLINE_KEYS_BY_SERVICE = {
+    "stt": ("DEEPGRAM_API_KEY",),
+    "llm": ("OPENAI_API_KEY",),
+    "tts": ("CARTESIA_API_KEY",),
+}
+
+
+def _load_config_files(root: Path | None = None) -> None:
+    """Load ``.locatrc`` (settings), then ``.env`` (keys), as dotenv defaults.
+
+    Both loads are no-override, so the shell environment beats both files and
+    ``.locatrc`` beats ``.env`` for a name in both. ``LOCAT_ENV_FILE`` overrides
+    which settings file loads (locat.sh and configure.sh honor the same
+    variable; tests point it at /dev/null for isolation); the keys file is
+    always ``.env`` at the repo root.
+    """
+    root = Path(root) if root is not None else REPO_ROOT
+    try:
+        from dotenv import load_dotenv
+    except Exception:  # python-dotenv is a dep, but never hard-fail on import
+        return
+    load_dotenv(os.environ.get("LOCAT_ENV_FILE") or root / SETTINGS_FILE_NAME)
+    load_dotenv(root / KEYS_FILE_NAME)
+
+
+_load_config_files()
 
 
 def _resolve_repo_path(raw: str) -> Path:
@@ -104,9 +147,9 @@ os.environ.setdefault("OLLAMA_MODELS", str(MODELS_DIR / "ollama"))
 
 
 # --- Legacy env names (everything we own gained a LOCAT_ prefix) ------------
-# Renaming is silent by nature: an old key in .env is simply never read, and the
-# bot comes up on defaults with no hint that the setting was dropped. Detect and
-# say so instead.
+# Renaming is silent by nature: an old key in a config file is simply never
+# read, and the bot comes up on defaults with no hint that the setting was
+# dropped. Detect and say so instead.
 _LEGACY_ENV_NAMES = (
     "STT_ENGINE", "TTS_ENGINE", "WHISPER_MODEL", "FASTER_WHISPER_MODEL",
     "MOONSHINE_MODEL", "KOKORO_VOICE", "KOKORO_MODEL_PATH", "KOKORO_VOICES_PATH",
@@ -117,28 +160,55 @@ _LEGACY_ENV_NAMES = (
 )
 
 
-def legacy_env_keys() -> list[str]:
-    """Pre-prefix keys still present in ``./.env``.
-
-    Only the repo's own .env is scanned, never the ambient environment: names
-    like ``LOG_LEVEL`` and ``GREETING`` are generic enough that someone's shell
-    profile could export them for entirely unrelated reasons, and warning about
-    that would be noise. A key in .env, by contrast, was meant for this bot.
-    """
-    path = REPO_ROOT / ".env"
-    if not path.is_file():
-        return []
-    found = []
+def _dotenv_keys(path: Path) -> list[str]:
+    """Variable names assigned in a dotenv-style file; [] when unreadable."""
     try:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key = line.split("=", 1)[0].strip()
-            if key in _LEGACY_ENV_NAMES:
-                found.append(key)
+        if not path.is_file():
+            return []
+        lines = path.read_text().splitlines()
     except OSError:
         return []
+    keys = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        keys.append(line.split("=", 1)[0].strip())
+    return keys
+
+
+ONLINE_ENV_PREFIXES = ("LOCAT_ONLINE_", "LOCAT_PUBLIC_RAG_")
+
+
+def legacy_settings_in_env(root: Path | None = None) -> list[str]:
+    """Offline ``LOCAT_*`` settings sitting in ``.env``.
+
+    ``.env`` holds the online-session config: the three keys plus
+    ``LOCAT_ONLINE_*`` / ``LOCAT_PUBLIC_RAG_*``. Everything else belongs in
+    ``.locatrc``; both files are dotenv loads, so the values still apply — the
+    names are reported so one startup line can point them at ``.locatrc``.
+    """
+    root = Path(root) if root is not None else REPO_ROOT
+    return [
+        k
+        for k in _dotenv_keys(root / KEYS_FILE_NAME)
+        if k.startswith("LOCAT_") and not k.startswith(ONLINE_ENV_PREFIXES)
+    ]
+
+
+def legacy_env_keys() -> list[str]:
+    """Pre-prefix keys still present in ``./.locatrc`` or ``./.env``.
+
+    Only the repo's own files are scanned, never the ambient environment: names
+    like ``LOG_LEVEL`` and ``GREETING`` are generic enough that someone's shell
+    profile could export them for entirely unrelated reasons, and warning about
+    that would be noise. A key in a config file, by contrast, was meant for this bot.
+    """
+    found = []
+    for name in (SETTINGS_FILE_NAME, KEYS_FILE_NAME):
+        for key in _dotenv_keys(REPO_ROOT / name):
+            if key in _LEGACY_ENV_NAMES and key not in found:
+                found.append(key)
     return found
 
 
@@ -147,38 +217,31 @@ if _legacy:
     print(
         "locat: WARNING — these .env keys are no longer read; every setting this "
         "repo owns now takes a LOCAT_ prefix (the unprefixed names left are the "
-        "four read by huggingface_hub and ollama — see env.example):\n"
+        "four read by huggingface_hub and ollama — see locatrc.example):\n"
         + "\n".join(f"    {k}  ->  LOCAT_{k}" for k in _legacy),
+        file=sys.stderr,
+    )
+
+_misplaced = legacy_settings_in_env()
+if _misplaced:
+    print(
+        "locat: settings belong in .locatrc now, .env holds only "
+        f"{', '.join(ONLINE_KEY_NAMES)} — move from .env: {', '.join(_misplaced)} "
+        "(they still apply)",
         file=sys.stderr,
     )
 
 
 # --- Defaults for the runtime settings -------------------------------------
-# Whisper-MLX needs an Apple-Silicon GPU (MLX ships no other macOS builds);
-# everywhere else the CPU path (faster-whisper) is the working default.
-IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
-DEFAULT_STT_ENGINE = "whisper_mlx" if IS_APPLE_SILICON else "faster_whisper"
-DEFAULT_TTS_ENGINE = "kokoro"
-DEFAULT_WHISPER_MODEL = "LARGE_V3_TURBO"
-DEFAULT_FASTER_WHISPER_MODEL = "DISTIL_MEDIUM_EN"
-DEFAULT_MOONSHINE_MODEL = "SMALL_STREAMING"
-DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
-DEFAULT_LLM_MODEL = "qwen2.5:14b"
+# Models, voices, STT/TTS engines, architecture and the greeting come from the
+# tunables import above.
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_RAG_DATA_DIR = "data"
 DEFAULT_RAG_TOP_K = 4
 DEFAULT_RAG_CHUNK_TOKENS = 500
 DEFAULT_RAG_CHUNK_OVERLAP = 50
 DEFAULT_STATE_DIR = ".locat"
-DEFAULT_KOKORO_VOICE = "af_heart"
-DEFAULT_GREETING = (
-    "Hi. I'm your private, offline financial thinking partner. "
-    "What's on your mind today?"
-)
 DEFAULT_GREETING_DELAY_SECS = 1.0
-DEFAULT_MOQ_SUBSCRIBER_TIMEOUT = 15.0
-DEFAULT_MOQ_AUDIO_AHEAD_MS = 500
 DEFAULT_LOG_LEVEL = "DEBUG"
 
 # --- Silero VAD tuning ------------------------------------------------------
@@ -237,7 +300,7 @@ def whisper_model() -> str:
     Other members: TINY, MEDIUM, LARGE_V3. Must match a member the prefetch
     downloaded (``scripts/prefetch_models.py`` reads the same var).
     """
-    return _get("LOCAT_WHISPER_MODEL", DEFAULT_WHISPER_MODEL)
+    return _get("LOCAT_WHISPER_MODEL", "LARGE_V3_TURBO")
 
 
 def faster_whisper_model() -> str:
@@ -248,7 +311,7 @@ def faster_whisper_model() -> str:
     LARGE_V3_TURBO, DISTIL_LARGE_V2, DISTIL_MEDIUM_EN (English-only).
     Weights download from Hugging Face on first use (cached under HF_HOME).
     """
-    return _get("LOCAT_FASTER_WHISPER_MODEL", DEFAULT_FASTER_WHISPER_MODEL)
+    return _get("LOCAT_FASTER_WHISPER_MODEL", "DISTIL_MEDIUM_EN")
 
 
 def moonshine_model() -> str:
@@ -259,7 +322,7 @@ def moonshine_model() -> str:
     BASE_STREAMING, SMALL_STREAMING, MEDIUM_STREAMING. Weights download from
     the Moonshine hub on first use.
     """
-    return _get("LOCAT_MOONSHINE_MODEL", DEFAULT_MOONSHINE_MODEL)
+    return _get("LOCAT_MOONSHINE_MODEL", "SMALL_STREAMING")
 
 
 def piper_voice() -> str:
@@ -269,7 +332,7 @@ def piper_voice() -> str:
     (huggingface.co/rhasspy/piper-voices) works; the ~60 MB voice model
     downloads on first use into ``$LOCAT_MODEL_DIR/piper/``.
     """
-    return _get("LOCAT_PIPER_VOICE", DEFAULT_PIPER_VOICE)
+    return _get("LOCAT_PIPER_VOICE", "en_US-lessac-medium")
 
 
 def piper_download_dir() -> str:
@@ -292,12 +355,14 @@ def ollama_models_dir() -> str:
 
 
 def llm_model() -> str:
-    """Ollama model tag for the LLM (default ``qwen2.5:14b``).
+    """Ollama model tag for the conversation LLM (default ``qwen2.5:7b``).
 
     The same string ``scripts/run_ollama.sh`` uses to ``ollama pull``, so the
-    bot and the pull agree on which model is served.
+    bot and the pull agree on which model is served. qwen2.5:7b is the smallest
+    front that delegates follow-ups reliably on the split architecture (3/3;
+    3b/4b fronts drop them and fabricate).
     """
-    return _get("LOCAT_LLM_MODEL", DEFAULT_LLM_MODEL)
+    return _get("LOCAT_LLM_MODEL", "qwen2.5:7b")
 
 
 def ollama_base_url() -> str:
@@ -324,7 +389,7 @@ def embed_model() -> str:
     Served by the same Ollama instance as the LLM; pull it with
     ``ollama pull nomic-embed-text``.
     """
-    return _get("LOCAT_EMBED_MODEL", DEFAULT_EMBED_MODEL)
+    return _get("LOCAT_EMBED_MODEL", "nomic-embed-text")
 
 
 def rag_data_dir() -> str:
@@ -337,12 +402,257 @@ def rag_data_dir() -> str:
     return str(_resolve_repo_path(_get("LOCAT_RAG_DATA_DIR", DEFAULT_RAG_DATA_DIR)))
 
 
+def online_embed_model() -> str:
+    """OpenAI embedding model for the public index (LOCAT_ONLINE_EMBED_MODEL,
+    default ``text-embedding-3-small``).
+
+    Used only by the public (online-mode) index build and by online sessions
+    retrieving from it.
+    """
+    return _get("LOCAT_ONLINE_EMBED_MODEL", "text-embedding-3-small")
+
+
+def online_llm_model() -> str:
+    """OpenAI chat model for online sessions (LOCAT_ONLINE_LLM_MODEL, default
+    ``gpt-4o-mini``).
+    """
+    return _get("LOCAT_ONLINE_LLM_MODEL", "gpt-4o-mini")
+
+
+def online_rag_llm_model() -> str:
+    """OpenAI chat model for the online documents analyst
+    (LOCAT_ONLINE_RAG_LLM_MODEL, default ``gpt-4o-mini``).
+
+    The backend of the online llmwithbackend split; point it at a stronger
+    model in ``.env`` to compare latency/quality against the front.
+    """
+    return _get("LOCAT_ONLINE_RAG_LLM_MODEL", "gpt-4o-mini")
+
+
+def online_architecture() -> str:
+    """Online-session architecture (LOCAT_ONLINE_ARCHITECTURE, default
+    ``llmwithbackend``).
+
+    ``llmwithbackend`` (default): the online front delegates document questions
+    to an OpenAI documents analyst over the public index — pipecat's stock
+    pairing instructions and delegate tool, to show the pattern on hosted
+    frontier models.
+    ``cascade``: one model holds semantic_search directly.
+    Falls back to cascade when no public index exists.
+    """
+    value = _get("LOCAT_ONLINE_ARCHITECTURE", "llmwithbackend").strip().lower()
+    if value not in ("cascade", "llmwithbackend"):
+        raise SystemExit(
+            f"\n✖ Unknown LOCAT_ONLINE_ARCHITECTURE '{value}' — valid: llmwithbackend (default), cascade\n"
+        )
+    return value
+
+
+def online_stt_model() -> str:
+    """Deepgram model for online sessions (LOCAT_ONLINE_STT_MODEL, default
+    ``nova-3``).
+
+    nova-3 transcribes with ``language="multi"`` (services.build_online_stt),
+    so an English↔Spanish turn lands on one connection.
+    """
+    return _get("LOCAT_ONLINE_STT_MODEL", "nova-3")
+
+
+def online_tts_voice() -> str:
+    """Cartesia voice id for online sessions (LOCAT_ONLINE_TTS_VOICE).
+
+    The default — Cartesia's cross-lingual voice from pipecat's own examples —
+    speaks Spanish from the same id, so the language-practice beat needs no
+    voice swap.
+    """
+    return _get("LOCAT_ONLINE_TTS_VOICE", "86e30c1d-714b-4074-a1f2-1cb6b552fb49")
+
+
+SERVICE_MODES = ("offline", "online", "session")
+
+
+def _service_mode(name: str) -> str:
+    value = _get(name, "").strip().lower()
+    if not value:
+        return "session"
+    if value not in SERVICE_MODES:
+        raise SystemExit(
+            f"\n✖ Unknown {name} '{value}' — valid: session (default), offline, online\n"
+        )
+    return value
+
+
+def stt_mode() -> str:
+    """Speech-to-text pin (LOCAT_STT_MODE, default ``session``).
+
+    ``session`` follows whatever mode the connect request asks for; ``offline``
+    and ``online`` pin this service regardless.
+    """
+    return _service_mode("LOCAT_STT_MODE")
+
+
+def llm_mode() -> str:
+    """Brain pin (LOCAT_LLM_MODE, default ``session``).
+
+    The LLM mode decides persona, architecture, and which RAG db opens — an
+    online brain reads only the public index.
+    """
+    return _service_mode("LOCAT_LLM_MODE")
+
+
+def tts_mode() -> str:
+    """Text-to-speech pin (LOCAT_TTS_MODE, default ``session``).
+
+    ``session`` follows the connect request; ``offline`` and ``online`` pin
+    this service regardless.
+    """
+    return _service_mode("LOCAT_TTS_MODE")
+
+
+def missing_online_keys(services: tuple[str, ...] | None = None) -> list[str]:
+    """Which online-mode keys are unset or blank, in canonical order.
+
+    Defaults to all three services. Pass the services actually running online
+    so a mixed session is not asked for keys it never uses. The connect path
+    reports every missing one at once so a session is not fixed one key per
+    attempt.
+    """
+    if services is None:
+        wanted = set(ONLINE_KEY_NAMES)
+    else:
+        wanted = set()
+        for service in services:
+            if service not in ONLINE_KEYS_BY_SERVICE:
+                raise SystemExit(
+                    f"\n✖ Unknown service '{service}' — valid: "
+                    f"{', '.join(ONLINE_KEYS_BY_SERVICE)}\n"
+                )
+            wanted.update(ONLINE_KEYS_BY_SERVICE[service])
+    return [
+        name
+        for name in ONLINE_KEY_NAMES
+        if name in wanted and not os.getenv(name, "").strip()
+    ]
+
+
+def _truthy(name: str) -> bool:
+    return _get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def online_only() -> bool:
+    """Whether this process serves online sessions only (LOCAT_ONLINE_ONLY,
+    set by ``./locat.sh start --online-only``).
+
+    Skips the local LLM/STT/RAG preflights, so the bot starts with Ollama
+    down; a connect asking for offline is refused. When LOCAT_OFFLINE_ONLY is
+    also set, offline-only wins and this returns False. The
+    ``cascade-simple-chat`` architecture is local-only, so it wins too — a
+    workshop `.locatrc` carrying LOCAT_ONLINE_ONLY=1 would otherwise refuse
+    every session the bot can actually serve.
+    """
+    if architecture() == "cascade-simple-chat":
+        return False
+    return _truthy("LOCAT_ONLINE_ONLY") and not offline_only()
+
+
+def offline_only() -> bool:
+    """Whether this process serves offline sessions only (LOCAT_OFFLINE_ONLY,
+    set by ``./locat.sh start --offline-only``).
+
+    The local stack runs as usual; a connect asking for online is refused.
+    Wins over LOCAT_ONLINE_ONLY when both are set.
+    """
+    return _truthy("LOCAT_OFFLINE_ONLY")
+
+
+_simple_chat_override_warned = False
+
+
+def serve_mode() -> str:
+    """Which sessions this process serves: ``offline-only``, ``online-only``,
+    or ``both`` (the default when neither LOCAT_*_ONLY var is set)."""
+    global _simple_chat_override_warned
+    if (
+        _truthy("LOCAT_ONLINE_ONLY")
+        and not offline_only()
+        and architecture() == "cascade-simple-chat"
+        and not _simple_chat_override_warned
+    ):
+        _simple_chat_override_warned = True
+        print(
+            "locat: simple-chat is offline — overriding LOCAT_ONLINE_ONLY",
+            file=sys.stderr,
+        )
+    if offline_only():
+        return "offline-only"
+    if online_only():
+        return "online-only"
+    return "both"
+
+
+def public_rag_data_dir() -> str:
+    """Documents safe to send to the cloud (LOCAT_PUBLIC_RAG_DATA_DIR, default
+    ``$LOCAT_RAG_DATA_DIR/public``).
+
+    Offline mode indexes all of ``rag_data_dir()``; the public build indexes
+    only this subtree.
+    """
+    return str(
+        _resolve_repo_path(
+            _get("LOCAT_PUBLIC_RAG_DATA_DIR", str(Path(rag_data_dir()) / "public"))
+        )
+    )
+
+
 def rag_index_dir() -> str:
     """Where the built RAG index lives (LOCAT_RAG_INDEX_DIR, default
     ``$LOCAT_MODEL_DIR/rag-index``): chunks.jsonl + embeddings.npy +
     manifest.json, all written by ``./locat.sh index-rag``.
     """
     return str(_resolve_repo_path(_get("LOCAT_RAG_INDEX_DIR", str(MODELS_DIR / "rag-index"))))
+
+
+def rag_llm_model() -> str:
+    """LLM with backend needs a model that emits real API tool calls."""
+    return _get("LOCAT_RAG_LLM_MODEL", "qwen3:8b")
+
+
+def architecture() -> str:
+    """Bot architecture (LOCAT_ARCHITECTURE, default ``llmwithbackend``).
+
+    ``llmwithbackend`` (default): a conversational front model delegates records work
+    to a reasoning analyst backend (pipecat LLMWithBackend/BackendLLMWorker)
+    that runs the four retrieval tools.
+    ``cascade``: one model holds the four retrieval tools directly — the
+    simple, stable fallback.
+    ``cascade-simple-chat``: one model, chat only, no tools and no records
+    access — the smallest thing that talks, for machines that cannot run the
+    retrieval stack.
+    """
+    value = _get("LOCAT_ARCHITECTURE", "llmwithbackend").strip().lower()
+    if value not in ("cascade", "cascade-simple-chat", "llmwithbackend"):
+        raise SystemExit(
+            f"\n✖ Unknown LOCAT_ARCHITECTURE '{value}' — valid: llmwithbackend (default), cascade, cascade-simple-chat\n"
+        )
+    return value
+
+
+def rag_db_path() -> str:
+    """SQLite file backing the RAG index (LOCAT_RAG_DB, default
+    ``$LOCAT_RAG_INDEX_DIR/locat.db``): typed transaction rows, FTS5, and
+    sqlite-vec embeddings, all in one file.
+    """
+    return _get("LOCAT_RAG_DB", str(Path(rag_index_dir()) / "locat.db"))
+
+
+def public_rag_db_path() -> str:
+    """SQLite file backing the public RAG index (LOCAT_PUBLIC_RAG_DB, default
+    ``$LOCAT_RAG_INDEX_DIR/locat-public.db``): chunks from
+    ``public_rag_data_dir()`` embedded through OpenAI.
+
+    The only db online-mode code may open.
+    """
+    return _get("LOCAT_PUBLIC_RAG_DB", str(Path(rag_index_dir()) / "locat-public.db"))
 
 
 def rag_top_k() -> int:
@@ -374,7 +684,7 @@ def kokoro_voice() -> str:
     Kokoro's shipped ``Settings.voice`` default is ``None`` (unsynthesizable),
     so the bot always supplies an explicit id.
     """
-    return _get("LOCAT_KOKORO_VOICE", DEFAULT_KOKORO_VOICE)
+    return _get("LOCAT_KOKORO_VOICE", "af_heart")
 
 
 def kokoro_model_path() -> str:
@@ -405,7 +715,28 @@ def output_device_index() -> int | None:
 
 def greeting() -> str:
     """Opening line the bot speaks on startup (LOCAT_GREETING)."""
-    return _get("LOCAT_GREETING", DEFAULT_GREETING)
+    return _get("LOCAT_GREETING", LOCAT_GREETING)
+
+
+def online_greeting() -> str:
+    """Opening line an online session speaks (LOCAT_ONLINE_GREETING)."""
+    return _get("LOCAT_ONLINE_GREETING", LOCAT_ONLINE_GREETING)
+
+
+def simple_chat_greeting() -> str:
+    """Opening line a simple-chat session speaks (LOCAT_SIMPLE_CHAT_GREETING)."""
+    return _get("LOCAT_SIMPLE_CHAT_GREETING", LOCAT_SIMPLE_CHAT_GREETING)
+
+
+def offline_greeting() -> str:
+    """Opening line an offline session speaks, per architecture.
+
+    Simple-chat has no records access, so its own line wins over a
+    LOCAT_GREETING that promises finances.
+    """
+    if architecture() == "cascade-simple-chat":
+        return simple_chat_greeting()
+    return greeting()
 
 
 def greeting_delay_secs() -> float:
@@ -415,29 +746,6 @@ def greeting_delay_secs() -> float:
     """
     raw = os.getenv("LOCAT_GREETING_DELAY_SECS", "").strip()
     return float(raw) if raw else DEFAULT_GREETING_DELAY_SECS
-
-
-def moq_subscriber_timeout() -> float:
-    """Max seconds the MoQ bot holds its greeting for the browser's audio
-    subscription (LOCAT_MOQ_SUBSCRIBER_TIMEOUT).
-
-    MoQ is live media with no replay — a greeting spoken before the browser
-    subscribes is silently dropped. On timeout the bot greets anyway.
-    """
-    return _get_float("LOCAT_MOQ_SUBSCRIBER_TIMEOUT", DEFAULT_MOQ_SUBSCRIBER_TIMEOUT)
-
-
-def moq_audio_ahead_ms() -> int:
-    """Max milliseconds of bot audio written ahead of real time over MoQ
-    (LOCAT_MOQ_AUDIO_AHEAD_MS).
-
-    TTS generates faster than real time; without a tight cap the whole
-    utterance bursts onto the wire at once and overflows the browser's
-    playback ring buffer, which drops the oldest unplayed samples — the
-    start of every bot turn. Must stay well under the browser ring's
-    one-second capacity; raise only if playback stutters mid-utterance.
-    """
-    return _get_int("LOCAT_MOQ_AUDIO_AHEAD_MS", DEFAULT_MOQ_AUDIO_AHEAD_MS)
 
 
 def log_level() -> str:

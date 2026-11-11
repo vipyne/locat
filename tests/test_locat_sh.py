@@ -41,8 +41,10 @@ def run_locat(
     extra_args: list[str] | None = None,
     **extra_env: str,
 ) -> subprocess.CompletedProcess:
+    # Drop inherited LOCAT_* vars: importing config in the pytest process loads
+    # the repo .env into os.environ, which would override LOCAT_ENV_FILE=/dev/null.
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if not k.startswith("LOCAT_")},
         "LOCAT_ENV_FILE": "/dev/null",
         "LOCAT_STATE_DIR": str(state_dir),
         "OLLAMA_HOST": ollama_host,
@@ -98,6 +100,13 @@ def test_status_exits_zero_with_nothing_running(tmp_path):
     result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
     assert result.returncode == 0
     assert "ollama   not running" in result.stdout
+
+
+def test_status_lists_the_conversation_model(tmp_path):
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 0
+    assert re.search(r"^\s+LLM\s+qwen2\.5:7b", result.stdout, re.M), result.stdout
+    assert re.search(r"^\s+ANALYST\s+qwen3:8b", result.stdout, re.M), result.stdout
     assert "bot      not running" in result.stdout
 
 
@@ -138,10 +147,10 @@ def test_status_rag_line_without_index(tmp_path):
 
 
 def test_status_rag_line_with_index(tmp_path):
-    import rag
+    import ingest
 
     index_dir = tmp_path / "idx"
-    rag.index(REPO / "tests" / "fixtures", index_dir, rag.FakeEmbedder())
+    ingest.ingest(REPO / "tests" / "fixtures", index_dir / "locat.db", ingest.FakeEmbedder())
     result = run_locat(
         "status",
         tmp_path,
@@ -149,7 +158,7 @@ def test_status_rag_line_with_index(tmp_path):
         LOCAT_RAG_INDEX_DIR=str(index_dir),
     )
     assert result.returncode == 0
-    assert re.search(r"rag      index: \d+ chunks from 3 files", result.stdout)
+    assert re.search(r"rag      index: \d+ chunks from 4 files", result.stdout)
 
 
 def test_stop_leaves_foreign_ollama_alone(tmp_path):
@@ -239,7 +248,86 @@ def test_per_command_help_configure(tmp_path):
 def test_per_command_help_start(tmp_path):
     result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
     assert result.returncode == 0
-    assert "moq" in result.stdout and "headphones" in result.stdout
+    assert "browser" in result.stdout and "headphones" in result.stdout
+
+
+def test_per_command_help_start_documents_online_only(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "--online-only" in result.stdout
+    assert "LOCAT_ONLINE_ONLY=1" in result.stdout
+
+
+def test_per_command_help_start_documents_offline_only_and_architecture(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "--offline-only" in result.stdout
+    assert "LOCAT_OFFLINE_ONLY=1" in result.stdout
+    assert "--cascade" in result.stdout
+    assert "--llmwithbackend" in result.stdout
+    assert "LOCAT_ARCHITECTURE" in result.stdout
+
+
+def test_start_conflicting_mode_flags_refused(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--online-only", "--offline-only"],
+    )
+    assert result.returncode == 1
+    assert "--online-only" in result.stderr and "--offline-only" in result.stderr
+
+
+def test_start_conflicting_architecture_flags_refused(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--cascade", "--llmwithbackend"],
+    )
+    assert result.returncode == 1
+    assert "--cascade" in result.stderr and "--llmwithbackend" in result.stderr
+
+
+def test_start_headphones_refused_when_config_says_online_only(tmp_path):
+    # Decoy bot.pid so a wrong code path hits the already-running guard
+    # instead of launching the real stack.
+    decoy = subprocess.Popen(["sleep", "300"])
+    try:
+        (tmp_path / "bot.pid").write_text(str(decoy.pid))
+        result = run_locat(
+            "start",
+            tmp_path,
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["-t", "headphones"],
+            LOCAT_ONLINE_ONLY="1",
+        )
+        assert result.returncode == 1
+        assert "browser bot" in result.stderr
+    finally:
+        decoy.kill()
+
+
+def test_start_offline_only_flag_overrides_online_only_config(tmp_path):
+    """--offline-only beats LOCAT_ONLINE_ONLY=1 from a config file, so the
+    headphones refusal does not fire; the already-running guard proves we
+    got past it without launching anything."""
+    decoy = subprocess.Popen(["sleep", "300"])
+    try:
+        (tmp_path / "bot.pid").write_text(str(decoy.pid))
+        result = run_locat(
+            "start",
+            tmp_path,
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["-t", "headphones", "--offline-only"],
+            LOCAT_ONLINE_ONLY="1",
+        )
+        assert result.returncode == 1
+        assert "already running" in result.stderr
+        assert "browser bot" not in result.stderr
+    finally:
+        decoy.kill()
 
 
 def test_models_command_removed(tmp_path):
@@ -310,3 +398,349 @@ def test_status_verbose_shows_full_catalogs(tmp_path):
     assert "way-too-big-model:999b" in result.stdout  # untrimmed, like old configure -a
     assert "STT catalog" in result.stdout
     assert "TTS catalog" in result.stdout
+
+
+def test_command_line_env_beats_env_file(tmp_path):
+    env_file = tmp_path / "test.env"
+    env_file.write_text("LOCAT_LLM_MODEL=from-file:1b\n")
+    result = run_locat(
+        "status",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_ENV_FILE=str(env_file),
+        LOCAT_LLM_MODEL="from-cli:1b",
+    )
+    assert result.returncode == 0
+    assert re.search(r"^\s+LLM\s+from-cli:1b", result.stdout, re.M), result.stdout
+
+
+def test_env_file_inline_comments_stripped(tmp_path):
+    """Unquoted inline ` # comment` is not part of the value — matches
+    python-dotenv, so shell and bot resolve the same model tag."""
+    rc = tmp_path / "locatrc"
+    rc.write_text("LOCAT_RAG_LLM_MODEL=qwen3.8:27b   # records analyst backend\n")
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", LOCAT_ENV_FILE=str(rc))
+    assert result.returncode == 0
+    assert re.search(r"^\s+ANALYST\s+qwen3\.8:27b \(", result.stdout, re.M), result.stdout
+    assert "# records analyst backend" not in result.stdout
+
+
+def test_start_reports_missing_models_and_launches_nothing(tmp_path):
+    port = closed_port()
+    # The Python side reads LOCAT_OLLAMA_BASE_URL, not OLLAMA_HOST.
+    env = {
+        **isolated_store_env(tmp_path),
+        "LOCAT_OLLAMA_BASE_URL": f"http://127.0.0.1:{port}/v1",
+        "LOCAT_WEB_PORT": str(closed_port()),
+    }
+    result = run_locat(
+        "start",
+        tmp_path / "state",
+        f"127.0.0.1:{port}",
+        extra_args=["--offline-only", "--cascade"],
+        **env,
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "not downloaded:" in out
+    assert "ollama:qwen2.5:7b" in out
+    assert "prefetch_models.py" in out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_start_online_only_missing_keys_fails_before_launch(tmp_path):
+    env = {
+        **isolated_store_env(tmp_path),
+        "OPENAI_API_KEY": "",
+        "DEEPGRAM_API_KEY": "",
+        "CARTESIA_API_KEY": "",
+        "LOCAT_WEB_PORT": str(closed_port()),
+    }
+    result = run_locat(
+        "start",
+        tmp_path / "state",
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--online-only"],
+        **env,
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "OPENAI_API_KEY" in out
+    assert "not downloaded" not in out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_usage_and_start_help_document_setup(tmp_path):
+    result = run_locat("help", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 0
+    assert "./locat.sh setup" in result.stdout
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert 'setup needed: run "./locat.sh setup"' in result.stdout
+
+
+def test_per_command_help_start_documents_simple_chat(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "--cascade-simple-chat" in result.stdout
+
+
+def test_start_simple_chat_conflicts_with_other_architecture_flags(tmp_path):
+    for other in ("--cascade", "--llmwithbackend"):
+        result = run_locat(
+            "start",
+            tmp_path,
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--cascade-simple-chat", other],
+        )
+        assert result.returncode == 1
+        assert "--cascade-simple-chat" in result.stderr and other in result.stderr
+
+
+def test_start_simple_chat_overrides_online_only(tmp_path):
+    # Decoy bot.pid stops start at the already-running guard, after the
+    # override warning prints but before anything launches.
+    decoy = subprocess.Popen(["sleep", "300"])
+    try:
+        (tmp_path / "bot.pid").write_text(str(decoy.pid))
+        result = run_locat(
+            "start",
+            tmp_path,
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--cascade-simple-chat", "--online-only"],
+        )
+        assert result.returncode == 1
+        assert "already running" in result.stderr
+        assert "start: simple-chat is offline — overriding online-only." in result.stdout
+    finally:
+        decoy.kill()
+
+
+def test_start_offline_only_refuses_an_online_llm_pin(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--offline-only"],
+        LOCAT_LLM_MODE="online",
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "--offline-only" in result.stderr
+    assert "LOCAT_LLM_MODE=online" in result.stderr
+    assert "not downloaded" not in out  # refused before preflight
+    assert not (tmp_path / "bot.pid").exists()
+
+
+def test_start_online_only_refuses_an_offline_stt_pin(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        extra_args=["--online-only"],
+        LOCAT_STT_MODE="offline",
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "--online-only" in result.stderr
+    assert "LOCAT_STT_MODE=offline" in result.stderr
+    assert not (tmp_path / "bot.pid").exists()
+
+
+def test_start_refuses_an_unknown_service_mode(tmp_path):
+    result = run_locat(
+        "start",
+        tmp_path,
+        f"127.0.0.1:{closed_port()}",
+        LOCAT_TTS_MODE="sometimes",
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "LOCAT_TTS_MODE" in result.stderr
+    assert "session" in result.stderr and "online" in result.stderr
+
+
+def test_start_keys_nag_skips_services_pinned_offline(tmp_path):
+    """Only a service that can still go online gets its key asked for."""
+    env = {
+        **isolated_store_env(tmp_path),
+        "OPENAI_API_KEY": "",
+        "DEEPGRAM_API_KEY": "",
+        "CARTESIA_API_KEY": "",
+        "LOCAT_WEB_PORT": str(closed_port()),
+        "LOCAT_STT_MODE": "offline",
+        "LOCAT_TTS_MODE": "offline",
+    }
+    result = run_locat("start", tmp_path / "state", f"127.0.0.1:{closed_port()}", **env)
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "OPENAI_API_KEY" in out  # the brain can still run online
+    assert "DEEPGRAM_API_KEY" not in out
+    assert "CARTESIA_API_KEY" not in out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_start_all_services_pinned_offline_asks_for_no_keys(tmp_path):
+    env = {
+        **isolated_store_env(tmp_path),
+        "OPENAI_API_KEY": "",
+        "DEEPGRAM_API_KEY": "",
+        "CARTESIA_API_KEY": "",
+        "LOCAT_WEB_PORT": str(closed_port()),
+        "LOCAT_STT_MODE": "offline",
+        "LOCAT_LLM_MODE": "offline",
+        "LOCAT_TTS_MODE": "offline",
+    }
+    result = run_locat("start", tmp_path / "state", f"127.0.0.1:{closed_port()}", **env)
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    for key in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY"):
+        assert key not in out, out
+    assert not (tmp_path / "state" / "bot.pid").exists()
+
+
+def test_status_prints_the_three_service_pins(tmp_path):
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
+    assert result.returncode == 0
+    assert re.search(
+        r"^modes\s+stt session, llm session, tts session", result.stdout, re.M
+    ), result.stdout
+
+
+def test_status_prints_a_pinned_service_mode(tmp_path):
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", LOCAT_LLM_MODE="online")
+    assert result.returncode == 0
+    assert re.search(
+        r"^modes\s+stt session, llm online, tts session", result.stdout, re.M
+    ), result.stdout
+
+
+def test_per_command_help_documents_the_service_mode_pins(tmp_path):
+    result = run_locat("start", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    for var in ("LOCAT_STT_MODE", "LOCAT_LLM_MODE", "LOCAT_TTS_MODE"):
+        assert var in result.stdout
+    result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}", extra_args=["help"])
+    assert result.returncode == 0
+    assert "LOCAT_LLM_MODE" in result.stdout
+
+
+def _bind(port: int) -> socket.socket:
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", port))
+    s.listen(1)
+    return s
+
+
+def busy_ports_with_free_neighbor(n_busy: int) -> tuple[list[socket.socket], int]:
+    # Hold n_busy consecutive ports; the next one up is confirmed free.
+    for _ in range(50):
+        held = []
+        try:
+            held.append(_bind(0))
+            base = held[0].getsockname()[1]
+            for i in range(1, n_busy):
+                held.append(_bind(base + i))
+            _bind(base + n_busy).close()
+            return held, base
+        except OSError:
+            for s in held:
+                s.close()
+    raise RuntimeError("no run of consecutive free ports found")
+
+
+def start_env_failing_after_port_guard(tmp_path) -> dict:
+    # Empty model store + unreachable Ollama: start passes the port guard,
+    # then exits at the missing-models report without launching anything.
+    port = closed_port()
+    return {
+        **isolated_store_env(tmp_path),
+        "LOCAT_OLLAMA_BASE_URL": f"http://127.0.0.1:{port}/v1",
+    }
+
+
+def test_start_scans_past_a_port_held_by_a_foreign_process(tmp_path):
+    held, base = busy_ports_with_free_neighbor(1)
+    try:
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(base),
+        )
+        out = result.stdout + result.stderr
+        assert f"port {base} in use by pid" in out, out
+        assert f"using port {base + 1} instead" in out, out
+        assert "free the port" not in out, out
+        assert not (tmp_path / "state" / "bot.pid").exists()
+    finally:
+        for s in held:
+            s.close()
+
+
+def test_start_scans_past_several_busy_ports(tmp_path):
+    held, base = busy_ports_with_free_neighbor(2)
+    try:
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(base),
+        )
+        out = result.stdout + result.stderr
+        assert f"using port {base + 2} instead" in out, out
+    finally:
+        for s in held:
+            s.close()
+
+
+LISTENER_PRINTING_ITS_PORT = """
+import socket, time
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+s.listen(1)
+print(s.getsockname()[1], flush=True)
+time.sleep(300)
+"""
+
+
+def test_start_still_refuses_a_port_held_by_a_locat_bot(tmp_path):
+    # argv carries "bot_browser.py" so the guard's ps check sees a locat bot.
+    squatter = subprocess.Popen(
+        [sys.executable, "-c", LISTENER_PRINTING_ITS_PORT, "bot_browser.py"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        port = int(squatter.stdout.readline())
+        result = run_locat(
+            "start",
+            tmp_path / "state",
+            f"127.0.0.1:{closed_port()}",
+            extra_args=["--offline-only", "--cascade"],
+            **start_env_failing_after_port_guard(tmp_path),
+            LOCAT_WEB_PORT=str(port),
+        )
+        out = result.stdout + result.stderr
+        assert result.returncode == 1, out
+        assert "already serves a locat bot" in out, out
+        assert "using port" not in out, out
+    finally:
+        squatter.kill()
+
+
+def test_status_reports_the_port_the_bot_actually_bound(tmp_path):
+    bot = subprocess.Popen(["sleep", "300"])
+    try:
+        (tmp_path / "bot.pid").write_text(str(bot.pid))
+        (tmp_path / "bot.transport").write_text("browser")
+        (tmp_path / "bot.port").write_text("7912")
+        result = run_locat("status", tmp_path, f"127.0.0.1:{closed_port()}")
+        assert result.returncode == 0
+        assert "http://localhost:7912" in result.stdout, result.stdout
+    finally:
+        bot.kill()

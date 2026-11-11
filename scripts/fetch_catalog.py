@@ -84,12 +84,28 @@ def age_days(text):
     return int(m.group(1)) * AGE_UNITS.get(m.group(2), 365)
 
 
-def keep(name, labels, params):
+# Specialized families unfit for chat duty, matched by name (qwen3-coder,
+# mathstral, sqlcoder, llama-guard3, shieldgemma, bge-reranker…). Mirrors
+# configure.sh load_catalog's name filter.
+SPECIALIZED = re.compile(r"code|math|sql|rerank|embed|guard|shield")
+
+# Last ollama.com update older than this marks a legacy family (qwen:*,
+# llama2) — superseded generations outrank current ones on cumulative pulls.
+MAX_AGE_DAYS = 365
+UNKNOWN_AGE = 10_000
+
+
+def keep(name, labels, params, age=0):
     # `vision` is deliberately NOT excluded: it marks multimodal, not
     # image-only, and most current chat models carry it (gemma3 does, and has
     # no `tools` label either — no label combination separates llava from a
     # general chat model, so excluding on it silently drops good ones).
     if "embedding" in labels:
+        return False
+    if SPECIALIZED.search(name):
+        return False
+    # Unknown age (the sentinel) stays: a failed date parse is no verdict.
+    if MAX_AGE_DAYS < age < UNKNOWN_AGE:
         return False
     # Cloud-only models list no parameter sizes — they cannot be pulled locally,
     # and running one would defeat the point of this project.
@@ -126,7 +142,7 @@ def moe_active(name):
 
 
 def main():
-    entries = [e for e in parse_library(get(LIBRARY)) if keep(e[0], e[2], e[3])]
+    entries = [e for e in parse_library(get(LIBRARY)) if keep(e[0], e[2], e[3], e[5])]
     # Popularity alone buries anything new: pull counts are cumulative, so a
     # model released this month ranks below year-old ones no matter how good.
     # Interleaving the two orderings keeps the familiar names AND the new

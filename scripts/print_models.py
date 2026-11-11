@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
+from modes import OFFLINE_MODE, ONLINE_MODE, as_modes  # noqa: E402
 
 OUTSIDE_FLAG = "⚠️  outside LOCAT_MODEL_DIR"
 NOT_DOWNLOADED = "(not downloaded yet)"
@@ -203,6 +204,11 @@ def _path_line(found: Path | None) -> str:
     return f"  → {found}   {OUTSIDE_FLAG}"
 
 
+def _missing(found: Path | None) -> bool:
+    """No weights on disk for this role — the panel paints the line red."""
+    return found is None or not found.exists()
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -363,23 +369,79 @@ def _tts_line() -> str:
     return f"unknown engine '{engine}'"
 
 
-def model_entries() -> list[dict]:
-    """Importable form of the model lines (bot_moq sends them as `locat-config`)."""
+def _entry(role: str, model: str, found: Path | None, mode: str = OFFLINE_MODE) -> dict:
+    return {
+        "role": role,
+        "model": model,
+        "path": _path_line(found),
+        "missing": _missing(found),
+        "mode": mode,
+    }
+
+
+def _online_entry(role: str, model: str) -> dict:
+    return {"role": role, "model": model, "path": "—", "missing": False, "mode": ONLINE_MODE}
+
+
+def _llm_entry() -> dict:
+    # cascade holds the four retrieval tools on the RAG model directly.
+    model = config.rag_llm_model() if config.architecture() == "cascade" else config.llm_model()
+    return _entry(
+        "LLM",
+        f"{model} (Ollama @ {config.ollama_base_url()})",
+        _ollama_file(model),
+    )
+
+
+def model_entries(modes=OFFLINE_MODE) -> list[dict]:
+    """Importable form of the model lines (bot_browser sends them as `locat-config`).
+
+    Accepts a ``SessionModes`` or a bare "offline"/"online" string (coerced to
+    all three services that mode). STT and TTS key off their own mode; LLM,
+    ANALYST and EMBED all key off the LLM (brain) mode, so a mixed session can
+    list e.g. an offline STT row next to an online LLM row.
+    """
+    modes = as_modes(modes)
     ollama = f"(Ollama @ {config.ollama_base_url()})"
-    return [
-        {"role": "STT", "model": _stt_line(), "path": _path_line(_stt_file())},
-        {
-            "role": "LLM",
-            "model": f"{config.llm_model()} {ollama}",
-            "path": _path_line(_ollama_file(config.llm_model())),
-        },
-        {"role": "TTS", "model": _tts_line(), "path": _path_line(_tts_file())},
-        {
-            "role": "EMBED",
-            "model": f"{config.embed_model()} {ollama}",
-            "path": _path_line(_ollama_file(config.embed_model())),
-        },
-    ]
+    arch = config.architecture()
+    entries = []
+
+    if modes.stt == ONLINE_MODE:
+        entries.append(_online_entry("STT", f"{config.online_stt_model()} (Deepgram cloud)"))
+    else:
+        entries.append(_entry("STT", _stt_line(), _stt_file()))
+
+    if modes.llm == ONLINE_MODE:
+        entries.append(_online_entry("LLM", f"{config.online_llm_model()} (OpenAI cloud)"))
+    else:
+        entries.append(_llm_entry())
+        # Split runs the records analyst as its own (always local) model.
+        if arch == "llmwithbackend":
+            entries.append(
+                _entry(
+                    "ANALYST",
+                    f"{config.rag_llm_model()} {ollama}",
+                    _ollama_file(config.rag_llm_model()),
+                )
+            )
+
+    if modes.tts == ONLINE_MODE:
+        entries.append(_online_entry("TTS", f"{config.online_tts_voice()} (Cartesia cloud)"))
+    else:
+        entries.append(_entry("TTS", _tts_line(), _tts_file()))
+
+    if modes.llm == ONLINE_MODE:
+        entries.append(_online_entry("EMBED", f"{config.online_embed_model()} (OpenAI cloud)"))
+    # simple-chat never builds a records index, so it has no embed model.
+    elif arch != "cascade-simple-chat":
+        entries.append(
+            _entry(
+                "EMBED",
+                f"{config.embed_model()} {ollama}",
+                _ollama_file(config.embed_model()),
+            )
+        )
+    return entries
 
 
 def main() -> None:
@@ -392,8 +454,8 @@ def main() -> None:
     bare = "--bare" in sys.argv[1:]
     lines = []
     for entry in model_entries():
-        lines.append(f"{entry['role']:<7}{entry['model']}")
-        lines.append(f"       {entry['path']}")
+        lines.append(f"{entry['role']:<8}{entry['model']}")
+        lines.append(f"        {entry['path']}")
     if bare:
         for line in lines:
             print(f"         {line}")

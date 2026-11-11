@@ -3,21 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>locat</title>
   </head>
   <body>
     <header>
       <h1>locat</h1>
       <div id="controls">
+        <select id="mode-select" title="session mode">
+          <option value="offline">&#x1F50C; offline</option>
+          <option value="online">&#x2601;&#xFE0F; online</option>
+        </select>
+        <span id="mode-pinned" hidden></span>
         <button id="connect">Connect</button>
         <button id="mute" disabled>Mute</button>
+        <button id="mode-toggle" hidden title="analyst mode">&#x1F9E0; accurate</button>
         <span id="connection-state">disconnected</span>
+        <span id="transport-name" title="transport"></span>
       </div>
     </header>
-    <div id="webtransport-banner" hidden>
-      This browser can't open a WebTransport connection, which locat needs to
-      stream audio. Use a recent Chrome or Edge.
-    </div>
+    <div id="online-banner" hidden></div>
     <main id="app">
       <section id="transcript" aria-label="conversation transcript"></section>
       <form id="composer">
@@ -36,8 +41,8 @@
           <pre id="config-lines">connect to see the running config</pre>
         </section>
         <section id="rag-panel" aria-label="retrieved context">
-          <h2>retrieved context</h2>
-          <div id="rag-turns">no documents indexed — ./locat.sh index-rag</div>
+          <h2>retrieved context <span id="rag-stopwatch"></span></h2>
+          <div id="rag-turns">ask about your records — retrieved context shows up here</div>
         </section>
       </aside>
     </main>

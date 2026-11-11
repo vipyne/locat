@@ -12,7 +12,7 @@
 # curated Ollama LLM catalog ranked by fit (memory footprint AND estimated
 # speech latency), and both TTS engines (Kokoro, Piper). Interactive mode walks
 # through choosing an engine+model combo, approves it against the hardware, and
-# (only with your explicit confirmation) writes it to .env, installs missing
+# (only with your explicit confirmation) writes it to .locatrc, installs missing
 # engine support, and pulls missing models. Without -i it never writes.
 #
 # Usage:
@@ -25,9 +25,11 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
-ENV_FILE="${LOCAT_ENV_FILE:-.env}"
+# .locatrc holds settings; LOCAT_ENV_FILE repoints it. Keys live in .env, which
+# configure never reads or writes.
+ENV_FILE="${LOCAT_ENV_FILE:-.locatrc}"
 [[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
-# .env first (it may set LOCAT_MODEL_DIR), then resolve the one model directory
+# Settings first (they may set LOCAT_MODEL_DIR), then resolve the one model directory
 # and export HF_HOME / OLLAMA_MODELS / LOCAT_PIPER_DOWNLOAD_DIR / KOKORO_* from it.
 LOCAT_REPO_ROOT="$REPO"
 # shellcheck source=scripts/model_dir.sh
@@ -45,7 +47,7 @@ Usage:
                            machine's memory, then pull it into the Ollama
                            store as hf.co/<org>/<repo>:<quant> (default quant
                            Q4_K_M); prints the LOCAT_LLM_MODEL line to use it
-                           but never writes .env
+                           but never writes .locatrc
   ./configure.sh -v        the above, plus a full hardware profile (CPU/GPU
                            cores, est. memory bandwidth, disk) and per-slot
                            model catalogs with fit verdicts:
@@ -55,7 +57,7 @@ Usage:
                              TTS  Kokoro, Piper
   ./configure.sh -i        interactively pick an STT/LLM/TTS combo, get it
                            approved against the hardware, then (each step
-                           gated on your confirmation) write it to .env,
+                           gated on your confirmation) write it to .locatrc,
                            install missing engine support, and pull missing
                            models
 
@@ -124,8 +126,8 @@ LLM_CATALOG=(
   "qwen2.5:0.5b|1|"
   "qwen2.5:1.5b|1|"
   "qwen2.5:3b|2|"
-  "qwen2.5:7b|5|"
-  "qwen2.5:14b|10|project default"
+  "qwen2.5:7b|5|project default, "
+  "qwen2.5:14b|10|"
   "qwen2.5:32b|20|"
   "qwen2.5:72b|47|"
   "qwen3:0.6b|1|hybrid thinking"
@@ -134,7 +136,7 @@ LLM_CATALOG=(
   "qwen3:8b|6|hybrid thinking"
   "qwen3:14b|10|hybrid thinking"
   "qwen3:32b|20|hybrid thinking"
-  "llama3.2:1b|1|"
+  "llama3.2:1b|1|tiny"
   "llama3.2:3b|2|"
   "llama3.1:8b|5|"
   "llama3.1:70b|43|"
@@ -353,7 +355,7 @@ PY
     exit 1
   fi
   pass "pulled ${HF_TAG}"
-  echo "  to use it, set in .env (configure won't write it for you):"
+  echo "  to use it, set in ${ENV_FILE} (configure won't write it for you):"
   echo "     LOCAT_LLM_MODEL=${HF_TAG}"
   exit 0
 fi
@@ -397,11 +399,16 @@ load_catalog() {
     if (( SHOW_ALL == 0 )); then
       (( gb + 4 > RAM_GB )) && continue
       (( n >= CATALOG_LIMIT )) && continue
+      fam="${line%%:*}"
+      # Name filter: skip specialized families (code/math/sql/rerank/embed/
+      # guard/shield) unfit for chat duty. Mirrors fetch_catalog.keep().
+      case "$fam" in
+        *code*|*math*|*sql*|*rerank*|*embed*|*guard*|*shield*) continue ;;
+      esac
       # Cap size variants per family. Without this, a handful of popular
       # families spend the whole budget on their own 7 sizes and the list
       # shows ~11 distinct models. Cache order is largest-first, so the
       # survivors are the biggest that still fit.
-      fam="${line%%:*}"
       case " $seen_fams " in
         *" $fam:$fam "*) continue ;;
         *" $fam "*) seen_fams="$seen_fams $fam:$fam" ;;
@@ -495,7 +502,7 @@ llm_installed() {
 }
 
 # The embed model is usually configured bare ("nomic-embed-text") while the
-# store tags it ":latest" — match either form, like rag.py's preflight does.
+# store tags it ":latest" — match either form, like store.py's preflight does.
 EMBED_MODEL="${LOCAT_EMBED_MODEL:-nomic-embed-text}"
 embed_installed() {
   local t
@@ -940,9 +947,10 @@ if (( INTERACTIVE )); then
   print_slot_reccos llm
   print_catalog_table numbered
   OLD_IFS="$IFS"; IFS=$'\n'; CATALOG_ROWS=( $(sorted_catalog_rows) ); IFS="$OLD_IFS"
-  read -r -p "choose LLM [default ${LOCAT_LLM_MODEL:-qwen2.5:14b}]: " ans || ans=""
+  # must match config.llm_model()'s default (shell can't import Python)
+  read -r -p "choose LLM [default ${LOCAT_LLM_MODEL:-qwen2.5:7b}]: " ans || ans=""
   if [[ -z "$ans" ]]; then
-    CHOSEN_LLM="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+    CHOSEN_LLM="${LOCAT_LLM_MODEL:-qwen2.5:7b}"
   elif [[ "$ans" =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#CATALOG_ROWS[@]} )); then
     CHOSEN_LLM="$(echo "${CATALOG_ROWS[$((ans - 1))]}" | cut -d'|' -f3)"
   else
@@ -1003,37 +1011,41 @@ if (( INTERACTIVE )); then
     piper)  TTS_VOICE_VAR="LOCAT_PIPER_VOICE" ;;
   esac
   echo
-  echo "  .env lines for this combo:"
+  echo "  ${ENV_FILE} lines for this combo:"
   echo "     LOCAT_STT_ENGINE=${CHOSEN_STT_ENGINE}"
   echo "     ${STT_MODEL_VAR}=${CHOSEN_STT_MODEL}"
   echo "     LOCAT_LLM_MODEL=${CHOSEN_LLM}"
   echo "     LOCAT_TTS_ENGINE=${CHOSEN_TTS_ENGINE}"
   echo "     ${TTS_VOICE_VAR}=${CHOSEN_VOICE}"
   echo
+  echo "  llmwithbackend architecture (the default: fast front + thinking analyst backend) knobs:"
+  echo "     LOCAT_ARCHITECTURE=llmwithbackend         # already the default"
+  echo "     LOCAT_RAG_LLM_MODEL=qwen3:8b              # the analyst; needs real API tool calls (nemotron-3-nano fails as the analyst backend)"
+  echo
   if (( ! APPROVED )); then
     read -r -p "combo was rejected — continue anyway? [y/N] " ans || ans=""
     [[ "$ans" =~ ^[Yy] ]] || { echo "configure: no changes made"; exit 1; }
   fi
 
-  # --- Apply: write .env (with backup), only the model/engine keys ----------
+  # --- Apply: write .locatrc (with backup), only the model/engine keys -------
   env_set() {  # KEY VALUE — update in place or append; never touches other lines
-    if [[ -f .env ]] && grep -q "^$1=" .env; then
-      sed -i '' "s|^$1=.*|$1=$2|" .env
+    if [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; then
+      sed -i '' "s|^$1=.*|$1=$2|" "$ENV_FILE"
     else
-      echo "$1=$2" >> .env
+      echo "$1=$2" >> "$ENV_FILE"
     fi
   }
-  read -r -p "write these to .env? (existing .env backed up to .env.bak) [y/N] " ans || ans=""
+  read -r -p "write these to ${ENV_FILE}? (existing ${ENV_FILE} backed up to ${ENV_FILE}.bak) [y/N] " ans || ans=""
   if [[ "$ans" =~ ^[Yy] ]]; then
-    [[ -f .env ]] && cp .env .env.bak
+    [[ -f "$ENV_FILE" ]] && cp "$ENV_FILE" "${ENV_FILE}.bak"
     env_set LOCAT_STT_ENGINE "$CHOSEN_STT_ENGINE"
     env_set "$STT_MODEL_VAR" "$CHOSEN_STT_MODEL"
     env_set LOCAT_LLM_MODEL "$CHOSEN_LLM"
     env_set LOCAT_TTS_ENGINE "$CHOSEN_TTS_ENGINE"
     env_set "$TTS_VOICE_VAR" "$CHOSEN_VOICE"
-    pass "wrote .env (LOCAT_STT_ENGINE, ${STT_MODEL_VAR}, LOCAT_LLM_MODEL, LOCAT_TTS_ENGINE, ${TTS_VOICE_VAR})"
+    pass "wrote ${ENV_FILE} (LOCAT_STT_ENGINE, ${STT_MODEL_VAR}, LOCAT_LLM_MODEL, LOCAT_TTS_ENGINE, ${TTS_VOICE_VAR})"
   else
-    echo "  skipped — paste the lines above into .env yourself if you want them"
+    echo "  skipped — paste the lines above into ${ENV_FILE} yourself if you want them"
   fi
 
   # --- Apply: install missing engine support (uv sync --extra ...) ----------
@@ -1084,7 +1096,7 @@ if (( INTERACTIVE )); then
           (( NEED_EMBED )) && ! ollama pull "$EMBED_MODEL" \
             && warn "ollama pull ${EMBED_MODEL} failed — check the tag name and network"
         else
-          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOCAT_LLM_MODEL from .env on startup)"
+          warn "no Ollama server running — start ./scripts/run_ollama.sh (it pulls LOCAT_LLM_MODEL from .locatrc on startup)"
         fi
       fi
       if (( NEED_WHISPER )); then
@@ -1153,7 +1165,8 @@ else
 fi
 
 # --- RAM vs the configured LLM (only speak up if something's off) ------------
-LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+# must match config.llm_model()'s default (shell can't import Python)
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:7b}"
 
 # Best qwen2.5 tag for this much unified memory, leaving headroom for Whisper
 # (~1.6 GB), Kokoro (~0.3 GB), and the OS.

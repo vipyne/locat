@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # run_ollama.sh — start a local Ollama server whose model store lives INSIDE this
-# one model directory ($LOCAT_MODEL_DIR/ollama), then pull the conversation LLM.
+# one model directory ($LOCAT_MODEL_DIR/ollama), then pull the conversation LLM
+# and the records LLM.
 #
 # Why relocate the store: the whole point of `locat` is a self-contained, fully
 # offline bot. Keeping the Ollama blobs under $LOCAT_MODEL_DIR means every
 # checkpoint the bot needs lives in one place — see scripts/model_dir.sh.
 #
 # Usage:
-#   ./scripts/run_ollama.sh            # serve + pull the default model
+#   ./scripts/run_ollama.sh            # serve + pull both default models
 #   LOCAT_LLM_MODEL=qwen2.5:7b ./scripts/run_ollama.sh
 #
 # The server keeps running in the foreground so you can Ctrl-C to stop it, or run
@@ -21,11 +22,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# --- load .env for overrides (LOCAT_LLM_MODEL, OLLAMA_HOST), if present -----------
-if [[ -f "${REPO_ROOT}/.env" ]]; then
-  # shellcheck disable=SC1091
-  set -a; source "${REPO_ROOT}/.env"; set +a
-fi
+# --- load .env defaults (LOCAT_LLM_MODEL, OLLAMA_HOST); real env vars win ---------
+# .env supplies DEFAULTS only — values already in the environment (e.g. set on
+# the command line) win, matching config.py's load_dotenv behavior.
+load_env_defaults() {
+  local file="$1" line key value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+    key="${line%%=*}"; value="${line#*=}"
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then continue; fi
+    if [[ -z "${!key+x}" ]]; then export "$key=$value"; fi
+  done < "$file"
+}
+load_env_defaults "${LOCAT_ENV_FILE:-${REPO_ROOT}/.env}"
 
 # --- config (env-overridable) ------------------------------------------------
 # Resolves LOCAT_MODEL_DIR and exports OLLAMA_MODELS (plus the other engines'
@@ -36,7 +46,19 @@ LOCAT_REPO_ROOT="${REPO_ROOT}"
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_HOST
-LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+# must match config.llm_model()'s default (shell can't import Python)
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:7b}"
+
+# Conversation model and the embedder stay co-resident; a swap
+# costs a few seconds of weight loading per question.
+export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+export OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-16384}"
+export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-3}"
+# One user, one KV cache per model: parallel slots each hold a separate cache,
+# so a new delegation lands on a cold slot and re-prefills the whole analyst
+# prompt (43-47s TTFB between delegations vs 1.7s within one). Parallel=1
+# keeps every request on the single warm slot.
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
 
 mkdir -p "${OLLAMA_MODELS}"
 
@@ -73,9 +95,17 @@ else
   echo "run_ollama: server ready (pid ${SERVER_PID})."
 fi
 
-# --- pull the model (no-op if already present) ------------------------------
-echo "run_ollama: pulling '${LOCAT_LLM_MODEL}' (this needs network the first time)..."
-OLLAMA_HOST="${OLLAMA_HOST}" ollama pull "${LOCAT_LLM_MODEL}"
+# --- pull models (skipped when already in the store) -------------------------
+# `ollama pull` dials the registry even for present models, which fails offline.
+tag_present() { OLLAMA_HOST="${OLLAMA_HOST}" ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qxF "$1"; }
+for tag in "${LOCAT_LLM_MODEL}"; do
+  if tag_present "${tag}"; then
+    echo "run_ollama: '${tag}' already in the store — not pulling."
+  else
+    echo "run_ollama: pulling '${tag}' (this needs network the first time)..."
+    OLLAMA_HOST="${OLLAMA_HOST}" ollama pull "${tag}"
+  fi
+done
 
 echo "run_ollama: done. Available models:"
 OLLAMA_HOST="${OLLAMA_HOST}" ollama list

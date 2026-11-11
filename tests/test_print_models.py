@@ -190,3 +190,87 @@ def test_human_size_uses_binary_unit_labels():
     assert _human_size(3 * 2**30) == "3.0 GiB"
     assert _human_size(5 * 2**20) == "5 MiB"
     assert _human_size(7 * 2**10) == "7 KiB"
+
+
+def test_model_entries_lists_the_roles(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+
+    assert [e["role"] for e in entries] == ["STT", "LLM", "ANALYST", "TTS", "EMBED"]
+    by_role = {e["role"]: e for e in entries}
+    assert by_role["LLM"]["model"].startswith(config.llm_model())
+
+
+def test_model_entries_add_analyst_row_for_split(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "llmwithbackend")
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+    by_role = {e["role"]: e for e in entries}
+    assert by_role["ANALYST"]["model"].startswith(config.rag_llm_model())
+
+
+def test_model_entries_llm_row_uses_cascade_model(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade")
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+    by_role = {e["role"]: e for e in entries}
+    assert by_role["LLM"]["model"].startswith(config.rag_llm_model())
+    assert "ANALYST" not in by_role
+
+
+def test_model_entries_simple_chat_omits_embed_and_analyst(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setenv("LOCAT_ARCHITECTURE", "cascade-simple-chat")
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+    roles = [e["role"] for e in entries]
+    assert "EMBED" not in roles
+    assert "ANALYST" not in roles
+    by_role = {e["role"]: e for e in entries}
+    assert by_role["LLM"]["model"].startswith(config.llm_model())
+
+
+def test_model_entries_tags_offline_rows_with_their_mode(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries()
+
+    assert entries
+    assert all(e["mode"] == "offline" for e in entries)
+
+
+def test_model_entries_accepts_bare_online_string(monkeypatch):
+    from scripts import print_models
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    entries = print_models.model_entries("online")
+
+    assert [e["role"] for e in entries] == ["STT", "LLM", "TTS", "EMBED"]
+    assert all(e["mode"] == "online" for e in entries)
+    assert all(e["path"] == "—" for e in entries)
+
+
+def test_model_entries_mixed_session_lists_both_modes_together(monkeypatch):
+    from scripts import print_models
+    from modes import SessionModes
+
+    monkeypatch.setattr(print_models, "_ollama_file", lambda tag: None)
+    modes = SessionModes(session="online", stt="offline", llm="online", tts="offline")
+
+    entries = print_models.model_entries(modes)
+    by_role = {e["role"]: e for e in entries}
+
+    assert by_role["STT"]["mode"] == "offline"
+    assert by_role["LLM"]["mode"] == "online"
+    assert by_role["TTS"]["mode"] == "offline"
+    assert "cloud" in by_role["LLM"]["model"]
+    assert "ANALYST" not in by_role
+    assert by_role["EMBED"]["mode"] == "online"

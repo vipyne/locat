@@ -6,10 +6,18 @@
 # (default .locat/). An Ollama you started yourself is never touched.
 #
 # Usage:
-#   ./locat.sh start [-t moq|headphones]   # bring up Ollama if needed, then the bot (default: moq)
+#   ./locat.sh setup                       # one-time setup: deps checked, .locatrc/.env seeded, uv sync
+#   ./locat.sh start [-t browser|headphones] [--online-only|--offline-only] [--cascade|--llmwithbackend|--cascade-simple-chat]
+#                                         # bring up Ollama if needed, then the bot (default: browser)
+#                                         # --online-only: cloud-only sessions, no Ollama, no local models
+#                                         # --offline-only: local sessions only; an online connect is refused
+#                                         # LOCAT_STT_MODE/LOCAT_LLM_MODE/LOCAT_TTS_MODE=offline|online pin one service
+#                                         # --cascade: STT, LLM, TTS bot architecture; has tool calls
+#                                         # --llmwithbackend: front LLM/analyst LLM bot architecture
+#                                         # --cascade-simple-chat: STT, LLM, TTS bot architecture; no tool calls
 #   ./locat.sh stop                        # stop only what locat started (recorded PIDs)
 #   ./locat.sh status [-v]                 # machine, ownership, bot, models (configured + downloaded), rag; -v adds full catalogs
-#   ./locat.sh index-rag                   # build/rebuild the document index
+#   ./locat.sh index-rag                   # build/rebuild both document indexes
 #   ./locat.sh consolidate [-n]            # adopt models from default HF/Ollama dirs (symlinks)
 #   ./locat.sh configure [args]            # delegates to ./configure.sh
 #   ./locat.sh get-debug-log [n]           # bundle the latest (or nth-latest) session log for debugging
@@ -18,8 +26,34 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO"
-ENV_FILE="${LOCAT_ENV_FILE:-.env}"
-[[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
+# Config files supply DEFAULTS only — values already in the environment (e.g.
+# set on the command line) win, matching config.py's load_dotenv behavior.
+load_env_defaults() {
+  local file="$1" line key value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+    key="${line%%=*}"; value="${line#*=}"
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then continue; fi
+    # Unquoted value: drop inline ` # comment` and trailing whitespace —
+    # python-dotenv does the same, so shell and bot read one value.
+    if [[ ! "$value" =~ ^[\"\'] ]]; then
+      value="${value%%[[:space:]]\#*}"
+      value="${value%"${value##*[![:space:]]}"}"
+    fi
+    if [[ -z "${!key+x}" ]]; then export "$key=$value"; fi
+  done < "$file"
+}
+# .locatrc holds settings (LOCAT_ENV_FILE repoints it), .env the hosted keys.
+ENV_FILE="${LOCAT_ENV_FILE:-.locatrc}"
+load_env_defaults "$ENV_FILE"
+load_env_defaults ".env"
+# Settings left in .env still apply (both are dotenv loads); cmd_start says
+# where they belong.
+MISPLACED_SETTINGS=""
+if [[ -f .env ]]; then
+  MISPLACED_SETTINGS="$(grep -oE '^[[:space:]]*LOCAT_[A-Za-z0-9_]+' .env 2>/dev/null | tr -d ' ' | grep -vE '^LOCAT_(ONLINE_|PUBLIC_RAG_)' | paste -sd, - || true)"
+fi
 LOCAT_REPO_ROOT="$REPO"
 # shellcheck source=scripts/model_dir.sh
 . "$REPO/scripts/model_dir.sh"
@@ -29,14 +63,86 @@ case "$STATE_DIR" in /*) ;; *) STATE_DIR="$REPO/$STATE_DIR" ;; esac
 
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_BASE="http://${OLLAMA_HOST}"
-LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:14b}"
+# must match config.llm_model()'s default (shell can't import Python)
+LOCAT_LLM_MODEL="${LOCAT_LLM_MODEL:-qwen2.5:7b}"
 LOCAT_WEB_PORT="${LOCAT_WEB_PORT:-7860}"
 WEB_URL="http://localhost:${LOCAT_WEB_PORT}"
 
 usage() { grep '^#   ' "$0" | sed 's/^#   //'; }
 
 ollama_up()   { curl -sf --max-time 2 "$OLLAMA_BASE/api/tags" -o /dev/null 2>/dev/null; }
-model_ready() { curl -sf --max-time 3 "$OLLAMA_BASE/api/tags" 2>/dev/null | grep -q "\"${LOCAT_LLM_MODEL}"; }
+tag_ready()   { curl -sf --max-time 3 "$OLLAMA_BASE/api/tags" 2>/dev/null | grep -q "\"$1"; }
+model_ready() { tag_ready "$LOCAT_LLM_MODEL"; }
+missing_models() {
+  local missing=""
+  tag_ready "$LOCAT_LLM_MODEL" || missing="$LOCAT_LLM_MODEL"
+  echo "$missing"
+}
+
+truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Effective serve mode from LOCAT_OFFLINE_ONLY / LOCAT_ONLINE_ONLY —
+# matches config.serve_mode(): offline-only wins a conflict.
+serve_mode() {
+  if truthy "${LOCAT_OFFLINE_ONLY:-}"; then echo "offline-only"
+  elif truthy "${LOCAT_ONLINE_ONLY:-}"; then echo "online-only"
+  else echo "both"
+  fi
+}
+
+# cascade-simple-chat is local-only, so modes.resolve_modes() forces every
+# service offline there and the pins never apply.
+simple_chat() { [[ "${LOCAT_ARCHITECTURE:-llmwithbackend}" == "cascade-simple-chat" ]]; }
+
+# Normalized pin for one service — "session" (follow the connect), "offline"
+# or "online". Mirrors config._service_mode().
+pin_of() {
+  local var value
+  if simple_chat; then echo "offline"; return 0; fi
+  var="LOCAT_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')_MODE"
+  value="$(printf '%s' "${!var:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  echo "${value:-session}"
+}
+
+# Refuse an unknown pin value here, in the parent shell: pin_of runs inside a
+# command substitution and its exit would only leave the subshell.
+check_service_pins() {
+  local svc var
+  for svc in stt llm tts; do
+    var="LOCAT_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')_MODE"
+    case "$(pin_of "$svc")" in
+      session|offline|online) ;;
+      *) echo "locat: unknown $var '${!var}' — valid: session (default), offline, online" >&2
+         exit 1 ;;
+    esac
+  done
+}
+
+# Pins matching one mode, as "VAR=value" pairs for an error message.
+pins_matching() {
+  local svc var list=""
+  for svc in stt llm tts; do
+    var="LOCAT_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')_MODE"
+    if [[ "$(pin_of "$svc")" == "$1" ]]; then list="${list:+$list, }$var=$1"; fi
+  done
+  echo "$list"
+}
+
+# Services that could still run online under the current flags and pins — the
+# only ones whose cloud keys matter.
+online_capable_services() {
+  local svc list=""
+  if [[ "$1" == "offline-only" ]]; then echo ""; return 0; fi
+  for svc in stt llm tts; do
+    if [[ "$(pin_of "$svc")" != "offline" ]]; then list="${list:+$list,}$svc"; fi
+  done
+  echo "$list"
+}
 
 pid_alive()    { [[ -n "${1:-}" ]] && ps -p "$1" >/dev/null 2>&1; }
 recorded_pid() { cat "$STATE_DIR/$1.pid" 2>/dev/null || true; }
@@ -63,25 +169,175 @@ model_lines() {
 }
 
 rag_line() {
-  uv run python rag.py stats --bare 2>/dev/null \
+  uv run python ingest.py stats --bare 2>/dev/null \
     || echo "no index (run ./locat.sh index-rag)"
 }
 
+public_rag_line() {
+  uv run python ingest.py stats --bare --public 2>/dev/null \
+    || echo "no index (run ./locat.sh index-rag)"
+}
+
+# Offline build over all of $LOCAT_RAG_DATA_DIR, then the public build over
+# data/public through OpenAI when a key is present.
+cmd_index_rag() {
+  uv run python ingest.py index || exit $?
+  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    uv run python ingest.py index --embedder openai || exit $?
+  else
+    echo "public index: skipped (no OPENAI_API_KEY in .env) — online mode needs it"
+  fi
+}
+
+# Setup guard: everything ./locat.sh setup seeds, reported together.
+setup_guard() {
+  local mode="$1" missing=0
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "start: uv not found" >&2; missing=1
+  fi
+  if [[ "$mode" != "online-only" ]] && ! command -v ollama >/dev/null 2>&1 && ! ollama_up; then
+    echo "start: ollama not found" >&2; missing=1
+  fi
+  if [[ "$ENV_FILE" == ".locatrc" && ! -f .locatrc ]]; then
+    echo "start: no .locatrc" >&2; missing=1
+  fi
+  if [[ ! -d "$REPO/.venv" ]]; then
+    echo "start: no .venv" >&2; missing=1
+  fi
+  if (( missing )); then
+    echo "setup needed: run \"./locat.sh setup\"" >&2
+    exit 1
+  fi
+  if [[ "$mode" != "offline-only" && ! -f .env ]]; then
+    echo "start: no .env — online sessions need API keys (./locat.sh setup seeds it from env.example)"
+  fi
+}
+
+# Report missing prerequisites from scripts/preflight.py and point at the fix.
+preflight_gate() {
+  local mode="$1" transport="$2" online_services="$3" report kind detail
+  local extras="" fetch="" rag=0 rag_public=0 keys=""
+  report="$(uv run python scripts/preflight.py --mode "$mode" --transport "$transport" \
+    --online-services "$online_services" 2>/dev/null)" \
+    || { echo "start: preflight failed — run: uv run python scripts/preflight.py" >&2; exit 1; }
+  while read -r kind detail; do
+    case "$kind" in
+      extra)  extras="$extras --extra $detail" ;;
+      ollama|stt|tts|daily) fetch="$fetch $kind:${detail##*/}" ;;
+      rag)        rag=1 ;;
+      rag-public) rag_public=1 ;;
+      key)        keys="${keys:+$keys, }$detail" ;;
+    esac
+  done <<<"$report"
+
+  local fatal=0
+  if [[ -n "$extras" ]]; then
+    echo "start: engine support not installed — run: uv sync --inexact$extras" >&2; fatal=1
+  fi
+  if [[ -n "$fetch" ]]; then
+    echo "start: not downloaded:$fetch" >&2
+    echo "start: fetch once (online): uv run python scripts/prefetch_models.py" >&2; fatal=1
+  fi
+  if [[ -n "$keys" ]]; then
+    if [[ "$mode" == "online-only" ]]; then
+      echo "start: online-only needs $keys in .env — add them and rerun" >&2; fatal=1
+    else
+      echo "start: .env is missing $keys — online sessions will fail until you add them"
+    fi
+  fi
+  if (( fatal )); then exit 1; fi
+  # Index notices: the bot starts and chats without an index.
+  if (( rag )); then
+    echo "start: documents found but no offline index — run: ./locat.sh index-rag"
+  fi
+  if (( rag_public )); then
+    echo "start: public documents found but no public index — run: ./locat.sh index-rag"
+  fi
+  return 0
+}
+
 cmd_start() {
-  local transport="moq"
+  local transport="browser" online_flag=0 offline_flag=0 cascade_flag=0 llmwb_flag=0 simple_chat_flag=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -t|--transport) transport="${2:-}"; shift 2 || shift ;;
-      -h|--help)      usage; exit 0 ;;
+      -t|--transport)   transport="${2:-}"; shift 2 || shift ;;
+      --online-only)    online_flag=1; shift ;;
+      --offline-only)   offline_flag=1; shift ;;
+      --cascade)        cascade_flag=1; shift ;;
+      --llmwithbackend) llmwb_flag=1; shift ;;
+      --cascade-simple-chat) simple_chat_flag=1; shift ;;
+      -h|--help)        usage; exit 0 ;;
       *) echo "locat: unknown start option '$1' (try ./locat.sh -h)" >&2; exit 1 ;;
     esac
   done
+  if (( online_flag && offline_flag )); then
+    echo "locat: --online-only and --offline-only conflict — pick one" >&2; exit 1
+  fi
+  if (( cascade_flag && llmwb_flag )); then
+    echo "locat: --cascade and --llmwithbackend conflict — pick one" >&2; exit 1
+  fi
+  if (( simple_chat_flag && cascade_flag )); then
+    echo "locat: --cascade-simple-chat and --cascade conflict — pick one" >&2; exit 1
+  fi
+  if (( simple_chat_flag && llmwb_flag )); then
+    echo "locat: --cascade-simple-chat and --llmwithbackend conflict — pick one" >&2; exit 1
+  fi
+  # Flags override the config files; zero the opposite mode var so the
+  # offline-wins conflict rule can't flip a flag's choice.
+  (( online_flag ))  && export LOCAT_ONLINE_ONLY=1 LOCAT_OFFLINE_ONLY=0
+  (( offline_flag )) && export LOCAT_OFFLINE_ONLY=1 LOCAT_ONLINE_ONLY=0
+  # Arch flags steer both session kinds: LOCAT_ARCHITECTURE (offline) and
+  # LOCAT_ONLINE_ARCHITECTURE (online) each default to llmwithbackend.
+  # simple-chat is offline-only, so it leaves LOCAT_ONLINE_ARCHITECTURE alone.
+  (( cascade_flag )) && export LOCAT_ARCHITECTURE=cascade LOCAT_ONLINE_ARCHITECTURE=cascade
+  (( llmwb_flag ))   && export LOCAT_ARCHITECTURE=llmwithbackend LOCAT_ONLINE_ARCHITECTURE=llmwithbackend
+  (( simple_chat_flag )) && export LOCAT_ARCHITECTURE=cascade-simple-chat
+  if [[ "${LOCAT_ARCHITECTURE:-llmwithbackend}" == "cascade-simple-chat" ]]; then
+    if truthy "${LOCAT_ONLINE_ONLY:-}"; then
+      export LOCAT_ONLINE_ONLY=0
+      echo "start: simple-chat is offline — overriding online-only."
+    fi
+  fi
+
+  local mode
+  mode="$(serve_mode)"
+  if [[ "$mode" == "offline-only" ]] && truthy "${LOCAT_ONLINE_ONLY:-}"; then
+    echo "start: LOCAT_ONLINE_ONLY and LOCAT_OFFLINE_ONLY are both set — offline-only wins."
+  fi
+
+  # Serve flags win over pins, same as modes.validate_modes() — refuse the
+  # conflict now instead of at the first connect.
+  check_service_pins
+  local crossing pinned_local
+  crossing="$(pins_matching online)"
+  pinned_local="$(pins_matching offline)"
+  if [[ "$mode" == "offline-only" && -n "$crossing" ]]; then
+    echo "locat: --offline-only (LOCAT_OFFLINE_ONLY=1) conflicts with $crossing — those services would cross the network" >&2
+    echo "locat: clear the pin in $ENV_FILE, or start without --offline-only" >&2
+    exit 1
+  fi
+  if [[ "$mode" == "online-only" && -n "$pinned_local" ]]; then
+    echo "locat: --online-only (LOCAT_ONLINE_ONLY=1) conflicts with $pinned_local — the local stack is not brought up" >&2
+    echo "locat: clear the pin in $ENV_FILE, or start without --online-only" >&2
+    exit 1
+  fi
+
   case "$transport" in
-    moq|headphones) ;;
-    *) echo "locat: unknown transport '$transport' — valid: moq (default), headphones" >&2; exit 1 ;;
+    browser|headphones) ;;
+    *) echo "locat: unknown transport '$transport' — valid: browser (default), headphones" >&2; exit 1 ;;
   esac
+  # The local-audio bot has no online stack to run.
+  if [[ "$mode" == "online-only" && "$transport" == "headphones" ]]; then
+    echo "locat: online-only (--online-only / LOCAT_ONLINE_ONLY=1) needs the browser bot — drop '-t headphones'" >&2; exit 1
+  fi
+
+  setup_guard "$mode"
 
   mkdir -p "$STATE_DIR"
+
+  if [[ -n "$MISPLACED_SETTINGS" ]]; then
+    echo "start: offline settings belong in .locatrc — .env holds the keys and online-session config; move from .env: $MISPLACED_SETTINGS (they still apply)" >&2
+  fi
 
   local bot_pid
   bot_pid="$(recorded_pid bot)"
@@ -90,21 +346,70 @@ cmd_start() {
     exit 1
   fi
 
-  if ! ollama_up; then
-    echo "start: bringing up Ollama (store → ${OLLAMA_MODELS}; log → ollama.log)"
-    nohup ./scripts/run_ollama.sh >"$REPO/ollama.log" 2>&1 &
-    echo $! >"$STATE_DIR/ollama.pid"
-  elif ! model_ready; then
-    echo "start: Ollama already running — pulling ${LOCAT_LLM_MODEL} into it..."
-    ./scripts/run_ollama.sh
-  fi
-  if ! model_ready; then
-    echo "start: waiting for ${LOCAT_LLM_MODEL} (first pull can take a few minutes)..."
-    for _ in $(seq 1 900); do model_ready && break; sleep 1; done
-    model_ready || { echo "start: ${LOCAT_LLM_MODEL} not ready — see ollama.log" >&2; exit 1; }
+  # Port guard: browser bot binds $LOCAT_WEB_PORT; a listener there means a
+  # bot locat didn't record (ownership rule: locat kills only recorded pids).
+  # Another locat bot → refuse; foreign listener → scan up for a free port.
+  if [[ "$transport" == "browser" ]] && command -v lsof >/dev/null 2>&1; then
+    local port_pid port_cmd candidate offset
+    port_pid="$(lsof -nP -tiTCP:"$LOCAT_WEB_PORT" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+    if [[ -n "$port_pid" ]]; then
+      port_cmd="$(ps -o command= -p "$port_pid" 2>/dev/null || true)"
+      if echo "$port_cmd" | grep -q "bot_browser.py"; then
+        echo "start: port $LOCAT_WEB_PORT already serves a locat bot (pid $port_pid) locat didn't start" >&2
+        echo "start: stop it with: kill $port_pid   (or ./locat.sh stop in the checkout that started it)" >&2
+        exit 1
+      fi
+      echo "start: port $LOCAT_WEB_PORT in use by pid $port_pid: ${port_cmd:-?}" >&2
+      candidate=""
+      for offset in $(seq 1 20); do
+        if [[ -z "$(lsof -nP -tiTCP:"$((LOCAT_WEB_PORT + offset))" -sTCP:LISTEN 2>/dev/null | head -n1 || true)" ]]; then
+          candidate=$((LOCAT_WEB_PORT + offset))
+          break
+        fi
+      done
+      if [[ -z "$candidate" ]]; then
+        echo "start: no free port in $((LOCAT_WEB_PORT + 1))-$((LOCAT_WEB_PORT + 20)) — pick one: LOCAT_WEB_PORT=<port> ./locat.sh start" >&2
+        exit 1
+      fi
+      echo "start: using port $candidate instead"
+      export LOCAT_WEB_PORT="$candidate"
+      WEB_URL="http://localhost:${LOCAT_WEB_PORT}"
+    fi
   fi
 
-  model_lines
+  preflight_gate "$mode" "$transport" "$(online_capable_services "$mode")"
+
+  if [[ "$mode" == "online-only" ]]; then
+    echo "start: online-only — sessions run on Deepgram/OpenAI/Cartesia; Ollama stays down."
+    echo "start: pick ☁️ online on the page; an offline connect is refused."
+  else
+    if [[ "$mode" == "offline-only" ]]; then
+      echo "start: offline-only — pick 🔒 offline on the page; an online connect is refused."
+    fi
+    if ! ollama_up; then
+      echo "start: bringing up Ollama (store → ${OLLAMA_MODELS}; log → ollama.log)"
+      nohup ./scripts/run_ollama.sh >"$REPO/ollama.log" 2>&1 &
+      echo $! >"$STATE_DIR/ollama.pid"
+      echo "start: waiting for Ollama to come up..."
+      for _ in $(seq 1 120); do ollama_up && break; sleep 1; done
+      ollama_up || { echo "start: Ollama did not come up — see ollama.log" >&2; exit 1; }
+    fi
+    # Preflight verified the weights on disk — the server only has to list them.
+    if ! model_ready; then
+      echo "start: waiting for $(missing_models) to be served..."
+      for _ in $(seq 1 60); do model_ready && break; sleep 1; done
+      model_ready || { echo "start: $(missing_models) not served — see ollama.log" >&2; exit 1; }
+    fi
+
+    # Fail before launch when any configured model is still missing on disk.
+    local models_out
+    models_out="$(model_lines)"
+    printf '%s\n' "$models_out"
+    if grep -qF '(not downloaded yet)' <<<"$models_out"; then
+      echo "start: models above are not downloaded — fetch once: uv run python scripts/prefetch_models.py" >&2
+      exit 1
+    fi
+  fi
 
   mkdir -p "$STATE_DIR/logs"
   if [[ -f "$STATE_DIR/bot.log" && ! -L "$STATE_DIR/bot.log" ]]; then
@@ -114,8 +419,11 @@ cmd_start() {
   ln -sf "$bot_log" "$STATE_DIR/bot.log"
   session_logs | tail -n +11 | xargs rm -f
   case "$transport" in
-    moq)
-      nohup uv run python bot_moq.py -t moq --host localhost --port "$LOCAT_WEB_PORT" >"$bot_log" 2>&1 &
+    browser)
+      # No -t pin: the runner then serves every installed browser transport
+      # (SmallWebRTC, websocket) and the client picks per session via
+      # /start — the webrtc → websocket fallback path needs this.
+      nohup uv run python bot_browser.py --host localhost --port "$LOCAT_WEB_PORT" >"$bot_log" 2>&1 &
       ;;
     headphones)
       echo "start: launching the local-audio bot — use headphones 🎧"
@@ -124,17 +432,27 @@ cmd_start() {
   esac
   echo $! >"$STATE_DIR/bot.pid"
   echo "$transport" >"$STATE_DIR/bot.transport"
+  if [[ "$transport" == "browser" ]]; then
+    echo "$LOCAT_WEB_PORT" >"$STATE_DIR/bot.port"
+  fi
   echo "start: bot starting (pid $(recorded_pid bot), log → ${bot_log#"$REPO"/})"
   echo "start: stop everything locat started with ./locat.sh stop"
 
-  if [[ "$transport" == "moq" ]]; then
+  if [[ "$transport" == "browser" ]]; then
     for _ in $(seq 1 120); do
       curl -sf --max-time 2 "$WEB_URL/" -o /dev/null 2>/dev/null && break
       pid_alive "$(recorded_pid bot)" || { echo "start: bot exited early — see ${bot_log#"$REPO"/}" >&2; exit 1; }
       sleep 1
     done
     echo "start: ▶ $WEB_URL — allow the mic and Connect."
-    if command -v open >/dev/null 2>&1; then
+    # Auto-open the page. LOCAT_OPEN_BROWSER=0 disables. Skipped on WSL: the
+    # right browser lives on the Windows side, which this shell can't open —
+    # xdg-open would launch a WSLg browser inside the VM instead.
+    if [[ "${LOCAT_OPEN_BROWSER:-1}" == "0" ]]; then
+      :
+    elif grep -qi microsoft /proc/version 2>/dev/null; then
+      echo "start: (WSL detected — open the URL above in a WINDOWS browser; add ?transport=websocket for audio)"
+    elif command -v open >/dev/null 2>&1; then
       open "$WEB_URL"
     elif command -v xdg-open >/dev/null 2>&1; then
       xdg-open "$WEB_URL"
@@ -207,10 +525,36 @@ cmd_get_debug_log() {
 
 cmd_help() {
   case "$1" in
+    setup)
+      echo "usage: ./locat.sh setup"
+      echo "  one-time setup for a fresh clone: checks uv + ollama (install hints when"
+      echo "  absent), copies .locatrc and .env from their examples, creates data/private,"
+      echo "  runs uv sync; safe to rerun"
+      echo "  models are the separate online step: uv run python scripts/prefetch_models.py" ;;
     start)
-      echo "usage: ./locat.sh start [-t moq|headphones]"
-      echo "  -t, --transport   moq (browser over Media-over-QUIC, the default)"
+      echo "usage: ./locat.sh start [-t browser|headphones] [--online-only|--offline-only] [--cascade|--llmwithbackend|--cascade-simple-chat]"
+      echo "  -t, --transport   browser (the default — serves websocket for offline"
+      echo "                    sessions and SmallWebRTC for online sessions)"
       echo "                    headphones (local mic/speakers via PyAudio — wear headphones)"
+      echo "  --online-only     serve online sessions only (LOCAT_ONLINE_ONLY=1): no Ollama,"
+      echo "                    no local model preflights; an offline connect is refused"
+      echo "  --offline-only    serve offline sessions only (LOCAT_OFFLINE_ONLY=1): local stack"
+      echo "                    as usual; an online connect is refused"
+      echo "  --cascade         STT, LLM, TTS (LOCAT_ARCHITECTURE / LOCAT_ONLINE_ARCHITECTURE=cascade)"
+      echo "  --llmwithbackend  front model + analyst backend, default"
+      echo "                    (LOCAT_ARCHITECTURE / LOCAT_ONLINE_ARCHITECTURE=llmwithbackend)"
+      echo "  --cascade-simple-chat  STT, LLM, TTS with no tools — chat only, offline only"
+      echo "                    (LOCAT_ARCHITECTURE=cascade-simple-chat; overrides online-only)"
+      echo "  flags win over .locatrc; both vars set means offline-only wins"
+      echo "  per-service pins, from $ENV_FILE or the environment, each session|offline|online:"
+      echo "    LOCAT_STT_MODE    speech recognition  (default session)"
+      echo "    LOCAT_LLM_MODE    the brain: persona, architecture, which RAG db opens"
+      echo "    LOCAT_TTS_MODE    the reply voice      (default session)"
+      echo "                    session follows what the connect asks for; a pin wins over it, so"
+      echo "                    LOCAT_LLM_MODE=online is a cloud brain with local ears and voice"
+      echo "                    a pin that crosses --offline-only / --online-only is refused here"
+      echo "  checks prerequisites first: a fresh clone gets 'setup needed: run \"./locat.sh setup\"',"
+      echo "  missing models/extras/indexes get the exact command to run"
       echo "  brings up Ollama first if nothing answers on \$OLLAMA_HOST (and records its pid)" ;;
     stop)
       echo "usage: ./locat.sh stop"
@@ -220,11 +564,15 @@ cmd_help() {
       echo "usage: ./locat.sh status [-v]"
       echo "  machine hardware, ollama (ownership + store), bot, configured models (full paths),"
       echo "  rag index, and an inventory of every model on disk with sizes"
+      echo "  the modes line shows the per-service pins (LOCAT_STT_MODE / LOCAT_LLM_MODE /"
+      echo "  LOCAT_TTS_MODE); session means that service follows what the connect asks for"
       echo "  -v, --verbose   also print the full STT/LLM/TTS catalogs (every model, even ones"
       echo "                  too big for this machine)" ;;
     index-rag)
       echo "usage: ./locat.sh index-rag"
-      echo "  builds the document index: \$LOCAT_RAG_DATA_DIR (default ./data) → \$LOCAT_RAG_INDEX_DIR"
+      echo "  builds the offline index: \$LOCAT_RAG_DATA_DIR (default ./data) → \$LOCAT_RAG_INDEX_DIR/locat.db"
+      echo "  then the public index for online mode: ./data/public → locat-public.db, embedded"
+      echo "  through OpenAI (skipped with a notice when OPENAI_API_KEY is unset)"
       echo "  rebuilds from scratch; run it again after adding/editing/removing documents" ;;
     get-debug-log)
       echo "usage: ./locat.sh get-debug-log [n]"
@@ -248,7 +596,7 @@ cmd_status() {
   echo "machine"
   ./configure.sh --hardware
 
-  local pid transport
+  local pid transport bot_port
   local store_desc="${OLLAMA_MODELS}"
   if [[ -L "${LOCAT_MODEL_DIR}/ollama" ]]; then
     store_desc="borrowed -> $(readlink "${LOCAT_MODEL_DIR}/ollama")"
@@ -267,8 +615,9 @@ cmd_status() {
   pid="$(recorded_pid bot)"
   if pid_alive "$pid"; then
     transport="$(cat "$STATE_DIR/bot.transport" 2>/dev/null || echo "?")"
-    if [[ "$transport" == "moq" ]]; then
-      echo "bot      running (pid $pid), transport: moq, $WEB_URL"
+    if [[ "$transport" == "browser" ]]; then
+      bot_port="$(cat "$STATE_DIR/bot.port" 2>/dev/null || echo "$LOCAT_WEB_PORT")"
+      echo "bot      running (pid $pid), transport: browser, http://localhost:${bot_port}"
     else
       echo "bot      running (pid $pid), transport: $transport"
     fi
@@ -276,8 +625,10 @@ cmd_status() {
     echo "bot      not running (./locat.sh start)"
   fi
 
+  echo "modes    stt $(pin_of stt), llm $(pin_of llm), tts $(pin_of tts)  (session = follows the connect; pin with LOCAT_STT_MODE/LOCAT_LLM_MODE/LOCAT_TTS_MODE)"
   model_lines --bare
   echo "rag      $(rag_line)"
+  echo "  public $(public_rag_line)"
 
   echo
   echo "downloaded"
@@ -295,15 +646,16 @@ CMD="${1:-}"
 case "${1:-}" in
   help|-h|--help)
     case "$CMD" in
-      start|stop|status|index-rag|get-debug-log|configure|consolidate)
+      setup|start|stop|status|index-rag|get-debug-log|configure|consolidate)
         cmd_help "$CMD"; exit 0 ;;
     esac ;;
 esac
 case "$CMD" in
+  setup)      exec ./setup.sh ;;
   start)      cmd_start "$@" ;;
   stop)       cmd_stop ;;
   status)     cmd_status "$@" ;;
-  index-rag)  exec uv run python rag.py index ;;
+  index-rag)  cmd_index_rag ;;
   consolidate) exec uv run python scripts/consolidate.py "$@" ;;
   configure)  exec ./configure.sh "$@" ;;
   get-debug-log) cmd_get_debug_log "$@" ;;

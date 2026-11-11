@@ -10,7 +10,11 @@ models/
 # User documents indexed by RAG
 data/
 
-# Local config (copied from env.example; config only, never secrets)
+# Local settings (copied from locatrc.example; config only, never secrets)
+.locatrc
+.locatrc.bak
+
+# Hosted API keys (copied from env.example)
 .env
 .env.bak
 
@@ -20,6 +24,10 @@ __pycache__/
 
 # Scratch/temp
 _verify_tmp.py
+.superpowers/
+
+# Model-sweep eval reports (evals/sweep.sh)
+evals/results/
 
 # Runtime + debug logs
 *.log
