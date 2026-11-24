@@ -12,9 +12,9 @@ dependencies = [
     # pipecat main's runner has an upload route; fastapi needs this for it.
     "python-multipart>=0.0.18",
     "num2words>=0.5.14",
-    # Pipecat ≥1.13: first release with LLMWithBackend / BackendLLMWorker
-    # (the split architecture). Intel macs stay on the frozen `intel-mac`
-    # branch (1.7) — core dep `loudness` ships no Intel-mac wheels.
+    # Pipecat 1.17 series; imports follow the 1.15 llm_with_backend module
+    # split (prompts/connector submodules). Intel macs stay on the frozen
+    # `intel-mac` branch (1.7) — core dep `loudness` ships no Intel-mac wheels.
     # Online-session cascade (deepgram STT / openai LLM + embeddings /
     # cartesia TTS) rides in the base install — a session picks its mode on
     # the page, so both stacks ship.
@@ -22,7 +22,7 @@ dependencies = [
     # aiortc 1.15.0 is a pure-Python wheel (py3-none-any) and its binary deps
     # all cover mac-arm64 / manylinux-x86_64 / win-amd64 (av cp312-abi3,
     # pylibsrtp cp310-abi3, aioice pure-python) — verified on PyPI 2026-10-21.
-    "pipecat-ai[cartesia,deepgram,kokoro,openai,silero,webrtc,whisper]>=1.13.0,<1.14",
+    "pipecat-ai[cartesia,deepgram,kokoro,openai,silero,webrtc,whisper]>=1.17.0,<1.18",
     # MLX ships no Intel-mac wheels — Whisper-MLX is Apple Silicon only; other
     # platforms default to faster-whisper (CPU) instead (see services.py).
     "pipecat-ai[mlx-whisper]; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -50,7 +50,7 @@ piper = ["pipecat-ai[piper]"]
 local-audio = ["pyaudio>=0.2.14"]
 
 [tool.uv]
-# pipecat pins onnxruntime ~=1.24.3, but onnxruntime 1.24 dropped Intel-mac
+# pipecat pins onnxruntime >=1.24.3,<2, but onnxruntime 1.24 dropped Intel-mac
 # wheels. 1.23 is API-compatible for everything that runs on it here (Silero
 # VAD, smart-turn, Kokoro, Moonshine), so Intel macs get 1.23 while every
 # other platform keeps pipecat's intended pin.

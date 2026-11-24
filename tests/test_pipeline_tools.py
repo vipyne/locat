@@ -229,10 +229,13 @@ def test_split_frontend_gets_domain_named_delegate(db, monkeypatch):
     monkeypatch.setenv("LOCAT_RAG_DB", str(db))
     built = pipeline.build_pipeline(fake_transport())
 
+    from pipecat.pipeline.llm_with_backend.llm_extension import BackendPairingLLMExtension
+
     lwb = next(p for p in built.pipeline._processors if isinstance(p, LLMWithBackend))
-    builtin = lwb.frontend.get_llm_adapter().builtin_tools
-    assert list(builtin) == ["ask_financial_records"]
-    assert "delegate" not in builtin
+    pairing = lwb.frontend.get_extension(BackendPairingLLMExtension)
+    names = [t.schema.name for t in pairing.builtin_tools({})]
+    assert names == ["ask_financial_records"]
+    assert "delegate" not in names
 
 
 def test_backend_worker_uses_LOCAT_FRONTEND_PAIRING_INSTRUCTION(db):
@@ -331,7 +334,7 @@ def test_spoken_backend_output_renders_without_relay_note():
     # Ollama maps developer-role notes to USER messages; the stock RELAY_NOTE
     # then re-triggers the relay on every later turn (measured: the front
     # repeats the old result instead of delegating the new question).
-    from pipecat.pipeline.llm_with_backend import BACKEND_MESSAGE_PREFIX
+    from pipecat.pipeline.llm_with_backend.prompts import BACKEND_MESSAGE_PREFIX
 
     connector = pipeline.build_records_connector()
 
@@ -419,6 +422,11 @@ def test_split_connector_does_not_rerun_front_on_delegate():
 
 def _deliver_all(connector, frontend, events):
     import asyncio
+
+    from pipecat.pipeline.llm_with_backend.connector import ConnectorContext
+
+    # deliver() requires a bound connector; LLMWithBackend binds in production.
+    connector.bind(ConnectorContext(backend_name="analyst", frontend_is_realtime=False))
 
     async def run():
         for event in events:

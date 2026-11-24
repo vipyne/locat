@@ -169,11 +169,11 @@ def build_records_connector():
     3/3. The tool description is domain-worded for the same reason (see
     DELEGATE_TOOL_DESCRIPTION).
     """
-    from pipecat.adapters.schemas.function_schema import FunctionSchema
+    from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
     from pipecat.frames.frames import LLMMessagesAppendFrame
-    from pipecat.pipeline.llm_with_backend import (
-        BACKEND_MESSAGE_PREFIX,
-        BackendConnector,
+    from pipecat.pipeline.llm_with_backend import BackendConnector
+    from pipecat.pipeline.llm_with_backend.prompts import BACKEND_MESSAGE_PREFIX
+    from pipecat.workers.llm.backend_llm_worker import (
         BackendError,
         BackendIdle,
         BackendOutput,
@@ -184,8 +184,7 @@ def build_records_connector():
         # Per-lull delivery state: something appended / something ran the front.
         _lull_appended = False
         _lull_ran_front = False
-        @property
-        def tools(self):
+        def build_tools(self):
             async def handler(params: FunctionCallParams):
                 await self.delegate(params)
 
