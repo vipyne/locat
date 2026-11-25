@@ -16,7 +16,7 @@
 #                                         # --llmwithbackend: front LLM/analyst LLM bot architecture
 #                                         # --cascade-simple-chat: STT, LLM, TTS bot architecture; no tool calls
 #   ./locat.sh stop                        # stop only what locat started (recorded PIDs)
-#   ./locat.sh status [-v]                 # machine, ownership, bot, models (configured + downloaded), rag; -v adds full catalogs
+#   ./locat.sh status [-v|-a]              # machine, ownership, bot, models (configured + downloaded), rag; -v adds full catalogs, -a abbreviates
 #   ./locat.sh index-rag                   # build/rebuild both document indexes
 #   ./locat.sh consolidate [-n]            # adopt models from default HF/Ollama dirs (symlinks)
 #   ./locat.sh configure [args]            # delegates to ./configure.sh
@@ -561,13 +561,14 @@ cmd_help() {
       echo "  stops ONLY processes locat started (pids recorded in $STATE_DIR)"
       echo "  an Ollama you started yourself is reported and left alone" ;;
     status)
-      echo "usage: ./locat.sh status [-v]"
+      echo "usage: ./locat.sh status [-v|-a]"
       echo "  machine hardware, ollama (ownership + store), bot, configured models (full paths),"
       echo "  rag index, and an inventory of every model on disk with sizes"
       echo "  the modes line shows the per-service pins (LOCAT_STT_MODE / LOCAT_LLM_MODE /"
       echo "  LOCAT_TTS_MODE); session means that service follows what the connect asks for"
-      echo "  -v, --verbose   also print the full STT/LLM/TTS catalogs (every model, even ones"
-      echo "                  too big for this machine)" ;;
+      echo "  -v, --verbose       also print the full STT/LLM/TTS catalogs (every model, even ones"
+      echo "                      too big for this machine)"
+      echo "  -a, --abbreviated   machine, ollama, bot, and downloaded model names ollama can see" ;;
     index-rag)
       echo "usage: ./locat.sh index-rag"
       echo "  builds the offline index: \$LOCAT_RAG_DATA_DIR (default ./data) → \$LOCAT_RAG_INDEX_DIR/locat.db"
@@ -584,10 +585,11 @@ cmd_help() {
 }
 
 cmd_status() {
-  local verbose=0
+  local verbose=0 abbrev=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -v|--verbose) verbose=1 ;;
+      -a|--abbreviated) abbrev=1 ;;
       *) echo "locat: unknown status option '$1' (try ./locat.sh status help)" >&2; exit 1 ;;
     esac
     shift
@@ -623,6 +625,16 @@ cmd_status() {
     fi
   else
     echo "bot      not running (./locat.sh start)"
+  fi
+
+  if (( abbrev )); then
+    echo "downloaded models:"
+    if ollama_up; then
+      OLLAMA_HOST="$OLLAMA_HOST" ollama list 2>/dev/null | awk 'NR>1 {print "  " $1}'
+    else
+      echo "  (ollama not running — can't list)"
+    fi
+    return
   fi
 
   echo "modes    stt $(pin_of stt), llm $(pin_of llm), tts $(pin_of tts)  (session = follows the connect; pin with LOCAT_STT_MODE/LOCAT_LLM_MODE/LOCAT_TTS_MODE)"

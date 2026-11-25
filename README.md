@@ -1,6 +1,6 @@
-# locat — a local, fully-offline Pipecat voice bot
+# LoCat - a local, fully-offline Pipecat voice bot
 
-> WIP but isn't everything?
+> WIP but isn't everything? 𖡡ᓚᘏᗢ𖡡
 
 An AI voice bot that runs Key-Free & **100% offline**. Speech-to-text, the language
 model, and text-to-speech are all local services; your records never leave
@@ -20,8 +20,6 @@ Prompts have no env var: every system prompt and canned line lives in
 [`tunables.py`](tunables.py), and editing that file IS how you change the
 personality. Read on to learn more.
 
----
-
 ## Requirements
 
 - **~15 GB free disk** for the models; **16 GB+ RAM** for the default model
@@ -33,6 +31,10 @@ personality. Read on to learn more.
 
 > [!NOTE]
 > Re: Ollama: Older servers ignore `reasoning_effort` on `/v1` (reasoning-model `<think>` text then reaches TTS). Any install works — the menu-bar Ollama.app, brew, or the install script — but separate installs update independently, so check the server itself with `curl -s http://localhost:11434/api/version`: the one answering on 11434 is the one that counts.
+
+## Not Required
+
+Any API Keys. Not one.
 
 ---
 
